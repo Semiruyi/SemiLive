@@ -14,7 +14,9 @@ SemiLive 是一个正在开发的 C++23 实时音视频项目，目标是完成�
 - `semilive_relay`：Linux 转发端占位程序；
 - `semilive_receiver`：接收端占位程序。
 
-具体内部架构将在实现每个里程碑前单独设计，不在工程骨架阶段预设。
+Publisher 首个视频阶段的模块边界、线程模型和运行语义已经确定，详见
+[Publisher 首版设计](docs/publisher-design.md)。Receiver 和 Relay 仍将在进入对应
+里程碑前单独设计。
 
 ## 项目目标
 
@@ -36,9 +38,10 @@ SemiLive 是一个正在开发的 C++23 实时音视频项目，目标是完成�
 - 生产级鉴权、集群调度和运维平台；
 - 自研音视频编码器。
 
-## 路线图
+## 设计与路线图
 
-详细的阶段目标和验收条件见 [项目路线图](docs/roadmap.md)。
+- [Publisher 首版设计](docs/publisher-design.md)：视频发布端的模块、线程、依赖与测试边界；
+- [项目路线图](docs/roadmap.md)：项目阶段、交付物和完成条件。
 
 ## 构建
 
@@ -69,4 +72,3 @@ ctest --preset linux-debug
 ## 许可证
 
 项目许可证尚未确定。在明确许可证前，请勿将本仓库代码视为已获得开源授权。
-
