@@ -1,3 +1,3 @@
 target_sources(semilive_publisher_core PRIVATE
-    default_notifier.cpp
+    captured_frame_store.cpp
 )

@@ -1,13 +1,10 @@
-find_package(spdlog CONFIG REQUIRED)
+function(semilive_target_add_logging target)
+    find_package(spdlog CONFIG REQUIRED)
 
-add_library(semilive_common_log STATIC
-    log.cpp
-)
-target_include_directories(semilive_common_log PUBLIC
-    ${PROJECT_SOURCE_DIR}/src
-)
-target_compile_features(semilive_common_log PUBLIC cxx_std_23)
-target_link_libraries(semilive_common_log PUBLIC
-    spdlog::spdlog
-)
-semilive_enable_warnings(semilive_common_log)
+    target_sources(${target} PRIVATE
+        ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/log.cpp
+    )
+    target_link_libraries(${target} PUBLIC
+        spdlog::spdlog
+    )
+endfunction()
