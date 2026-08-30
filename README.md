@@ -64,9 +64,9 @@ ctest --preset linux-debug
 运行占位程序：
 
 ```powershell
-.\build\windows-debug\semilive_publisher.exe --help
-.\build\windows-debug\semilive_relay.exe --help
-.\build\windows-debug\semilive_receiver.exe --help
+.\build\windows-debug\bin\semilive_publisher.exe --help
+.\build\windows-debug\bin\semilive_relay.exe --help
+.\build\windows-debug\bin\semilive_receiver.exe --help
 ```
 
 ## 许可证

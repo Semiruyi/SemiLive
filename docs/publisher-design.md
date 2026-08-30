@@ -42,13 +42,14 @@ DXGI 桌面采集 -> BGRA 处理 -> H.264 低延迟编码 -> RFC 6184 RTP 封包
 
 ## 2. 设计原则
 
-Publisher 参考 SemiPlayer 已验证的模块风格，并针对单次直播会话裁剪复杂度：
+Publisher 参考 SemiPlayer 已验证的模块风格，并针对首个视频阶段裁剪复杂度：
 
 - 应用编排、领域 Worker、领域资源、后端契约和基础设施分层；
 - Worker 依赖后端契约，不直接依赖 DXGI、FFmpeg 或 Winsock 具体类型；
 - Worker 拥有并独占自己的线程和有线程亲和性的后端；
 - 相邻 Worker 只通过容量受限的领域资源传递数据；
-- 领域资源分别暴露 Sink 和 Source 接口；
+- 领域资源分别暴露 Sink、Source 和 Control 接口；
+- 领域资源只提供非阻塞数据操作，不拥有条件变量或 Worker 停止语义；
 - 通知只用于唤醒，正确性始终依赖重新检查真实谓词；
 - 构造期注入依赖，运行期不使用服务定位器；
 - 第一版不引入 C ABI、异步命令句柄、Generation 和通用媒体 Graph。
@@ -77,28 +78,32 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对单次直播会�
 | 基础设施 | `UdpDatagramSink` | Winsock UDP 实现 |
 | 基础设施 | `MemoryDatagramSink` | RTP 单元和集成测试实现 |
 | 基础设施 | `H264FileWriter` | 可选 Annex-B 诊断输出 |
+| 基础设施 | `DefaultNotifier` | 按事件类型同步发布轻量边界通知 |
 | 可观测性 | `PublisherStats` | 原子计数、耗时累计、峰值和统计快照 |
-| 装配层 | `PublisherComposition` | 按依赖图构造对象并注入 Controller |
+| 装配层 | `PublisherComposition` | 管理进程级模块装配、所有权和逆序释放 |
 
 ## 4. 依赖关系
 
-本节只表达对象的创建和注入关系。构造完成后，`PublisherComposition` 不参与控制调用
-或媒体数据处理；运行时媒体关系由下一节的数据流图表达。
+本节只表达对象的创建、注入和持有关系。`PublisherComposition` 在进程存活期间持有完整
+对象图，但不参与运行时控制调用或媒体数据处理；运行时媒体关系由下一节的数据流图表达。
 
 ### 构造依赖图
 
-实线表示创建，虚线表示构造函数注入。`PublisherComposition::create()` 创建完整对象
-图，将最终所有权移交给 `PublisherController`，然后退出调用栈。
+实线表示创建，虚线表示构造函数注入或非拥有访问。`PublisherComposition::assemble()`
+创建并持有完整对象图，`dispose()` 按依赖逆序释放。
 
 ```mermaid
 flowchart TB
-    App[semilive_publisher / main] -->|调用 create| Composition[PublisherComposition]
+    App[semilive_publisher / main] -->|assemble / dispose| Composition[PublisherComposition]
     App -->|传入| Config[PublisherConfig]
     Config --> Composition
 
+    Composition -->|创建并持有| Notifier[DefaultNotifier]
     Composition -->|创建| Stats[PublisherStats]
     Composition -->|创建| FrameStore[CapturedFrameStore]
     Composition -->|创建| AuQueue[EncodedAccessUnitQueue]
+    Notifier -. 注入 .-> FrameStore
+    Notifier -. 注入 .-> AuQueue
 
     Composition -->|按配置创建| CaptureBackend[DxgiDesktopCaptureBackend<br/>或 SyntheticDesktopCaptureBackend]
     Composition -->|创建| Processor[SwsVideoFrameProcessor]
@@ -117,12 +122,14 @@ flowchart TB
     Scheduler -. 注入 .-> Capture
     FrameStore -. Sink 注入 .-> Capture
     Stats -. 注入 .-> Capture
+    Notifier -. 注入 .-> Capture
 
     FrameStore -. Source 注入 .-> Encoder
     Processor -. 注入 .-> Encoder
     EncoderBackend -. 注入 .-> Encoder
     AuQueue -. Sink 注入 .-> Encoder
     Stats -. 注入 .-> Encoder
+    Notifier -. 注入 .-> Encoder
 
     AuQueue -. Source 注入 .-> Sender
     FileWriter -. 注入 .-> Sender
@@ -130,18 +137,21 @@ flowchart TB
     Packetizer -. 注入 .-> Sender
     Datagram -. 注入 .-> Sender
     Stats -. 注入 .-> Sender
+    Notifier -. 注入 .-> Sender
 
-    Composition -->|创建并返回| Controller[PublisherController]
-    Capture -. 所有权移交 .-> Controller
-    Encoder -. 所有权移交 .-> Controller
-    Sender -. 所有权移交 .-> Controller
-    FrameStore -. 共享生命周期 .-> Controller
-    AuQueue -. 共享生命周期 .-> Controller
-    Stats -. 共享生命周期 .-> Controller
+    Composition -->|创建并持有| Controller[PublisherController]
+    Capture -. 控制接口注入 .-> Controller
+    Encoder -. 控制接口注入 .-> Controller
+    Sender -. 控制接口注入 .-> Controller
+    FrameStore -. Control 接口注入 .-> Controller
+    AuQueue -. Control 接口注入 .-> Controller
+    Stats -. 注入 .-> Controller
+    App -. controller 非拥有访问 .-> Controller
 ```
 
-`PublisherComposition` 可以实现为无状态工厂函数或只有静态 `create()` 的类型；不得把它
-保存到 Controller 中，也不得在运行期通过它查找服务。
+`PublisherComposition` 只向 Main 暴露非拥有的 `PublisherController` 指针或引用，其有效期
+从 `assemble()` 成功持续到 `dispose()` 开始。Main 不得持有 Controller 的共享所有权；
+Composition 也不得暴露 Worker、Store 或 Backend 查找接口。
 
 依赖约束：
 
@@ -151,7 +161,7 @@ flowchart TB
 - `DatagramSink` 不理解 H.264；
 - 基础设施可以依赖契约，契约不得依赖基础设施；
 - 底层模块不得依赖 `PublisherController` 或 `PublisherComposition`；
-- `PublisherComposition` 只在构造和释放阶段使用，不作为运行期服务定位器。
+- `PublisherComposition` 只管理进程级生命周期，不作为运行期服务定位器。
 
 ## 5. 运行时数据流
 
@@ -247,10 +257,15 @@ struct EncodedAccessUnit {
 ```text
 CapturedFrameSink   仅供 CaptureWorker
 CapturedFrameSource 仅供 VideoEncoderWorker
+CapturedFrameStoreControl 仅供 PublisherController
 ```
 
 首版容量为 2。Store 已满时，接受最新帧并替换最旧的未编码帧，同时增加丢帧统计。
 直播链路优先保留最新画面，不能因为编码短暂变慢而持续增加端到端延迟。
+
+资源只提供非阻塞的 `try_push()`、`try_pop()`、`empty()` 和状态查询。Store 从空变为非空
+时发送 `CapturedFrameStoreNotEmpty`；Worker 的通知回调只设置 hint 并唤醒自己的条件变量。
+`clear()` 只属于 Control 接口，用于停止或失败会话后的防御性清理，并返回被丢弃的帧数。
 
 ### 8.2 EncodedAccessUnitQueue
 
@@ -259,6 +274,7 @@ CapturedFrameSource 仅供 VideoEncoderWorker
 ```text
 EncodedAccessUnitSink   仅供 VideoEncoderWorker
 EncodedAccessUnitSource 仅供 RtpSenderWorker
+EncodedAccessUnitQueueControl 仅供 PublisherController
 ```
 
 首版容量为 4。Queue 已满时拒绝新项，`VideoEncoderWorker` 保留
@@ -274,7 +290,14 @@ AU Queue 满
 -> 内存保持有界，延迟不持续累积
 ```
 
-所有等待都必须支持资源关闭和 Worker 停止，避免退出时永久阻塞。
+Queue 从空变为非空时发送 `EncodedAccessUnitQueueNotEmpty`，从满变为非满时发送
+`EncodedAccessUnitQueueNotFull`。`clear()` 清空满队列时也发送一次 `NotFull`，并返回被丢弃
+的 AU 数量。
+
+两个资源都不包含条件变量、`stop_token`、阻塞等待、`close()` 或 `closed` 状态。每个
+Worker 使用自己的条件变量统一响应资源 hint、控制命令、失败和线程退出，并在醒来后重新
+检查资源的真实状态。正常停流由 Controller 按序命令 Worker 排空，资源析构只发生在所有
+Worker 线程停止之后。
 
 ## 9. 时间戳与帧率
 
@@ -335,35 +358,51 @@ RTP 规则：
 
 ## 11. 启动、停止和错误传播
 
-### 11.1 启动顺序
+### 11.1 进程装配
 
-先启动消费者，再启动生产者：
+Main 调用 `PublisherComposition::assemble()` 创建 Notifier、资源、后端、Worker 和
+Controller。Worker 线程属于模块生命周期，可以在装配阶段启动并等待控制命令；装配失败
+时 Composition 逆序停止并释放已经创建的模块。
+
+装配成功后，Main 通过 Composition 获取有效期受限的 Controller 非拥有访问。Main 只调用：
+
+```text
+PublisherComposition: assemble / controller / dispose
+PublisherController: start_publishing / stop_publishing / state / stats
+```
+
+### 11.2 开始发布
+
+`PublisherController::start_publishing()` 先清理上一次非正常会话残留，再按消费者到生产者
+的顺序配置并启动会话：
 
 ```text
 RtpSenderWorker -> VideoEncoderWorker -> CaptureWorker
 ```
 
-任一阶段启动失败时，Controller 按逆序停止已经启动的 Worker，并返回结构化错误。
+任一阶段启动失败时，Controller 按逆序停止已经启动的会话模块、清理资源并返回结构化
+错误；Worker 模块及其常驻线程仍由 Composition 持有。
 
-### 11.2 正常停止
+### 11.3 正常停止
 
 Ctrl+C 触发正常停止：
 
 ```text
-1. 停止 CaptureWorker，不再产生新帧
-2. 关闭 CapturedFrameStore 的生产端
-3. VideoEncoderWorker 处理有限的剩余帧并 flush 编码器
-4. 关闭 EncodedAccessUnitQueue 的生产端
-5. RtpSenderWorker 发送有限的剩余 AU
-6. 关闭文件和 socket，所有 Worker join
+1. Controller 命令 CaptureWorker 停止当前采集会话并等待确认
+2. 确认不再产生新帧后，命令 VideoEncoderWorker 排空 Frame Store
+3. VideoEncoderWorker flush 编码器并回到 Idle
+4. 命令 RtpSenderWorker 排空 AU Queue，关闭当前文件和 socket
+5. RtpSenderWorker 回到 Idle，Controller 状态回到 Idle
+6. Controller 通过 Control 接口防御性 clear 两个空资源
 ```
 
 因为两个领域资源都有固定容量，正常停止时的剩余工作量有明确上界。
 
-### 11.3 致命错误
+### 11.4 致命错误
 
-Worker 只上报第一个致命错误。Controller 收到错误后请求全局停止并关闭两个领域资源，
-唤醒所有等待线程。致命错误路径不保证排空媒体数据，优先保证及时、确定地退出。
+Worker 只上报第一个致命错误。Controller 收到错误后向三个 Worker 发送立即停止命令；
+Worker 自己的条件变量由控制命令直接唤醒，不依赖资源通知。致命错误路径不保证排空媒体
+数据，Controller 通过 Control 接口清理残留数据，优先保证及时、确定地回到 Failed 状态。
 
 错误包含：
 
@@ -373,6 +412,15 @@ Worker 只上报第一个致命错误。Controller 收到错误后请求全局�
 - 可读错误信息。
 
 异常不得越过线程入口；Worker 顶层捕获异常并转换为内部失败。
+
+### 11.5 进程释放
+
+Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话仍在运行，Composition
+先要求 Controller 停止会话，再停止 Controller 控制线程和三个 Worker 常驻线程，最后按
+依赖逆序释放 Worker、Backend、资源、Stats 和 Notifier。
+
+资源析构时必须已经没有线程访问它们。`dispose()` 幂等；Composition 析构函数将其作为
+兜底调用，但正常路径仍显式调用，以便记录停止失败。
 
 ## 12. 可观测性
 
@@ -399,8 +447,9 @@ Worker 只上报第一个致命错误。Controller 收到错误后请求全局�
 
 ### 13.1 领域单元测试
 
-- `CapturedFrameStore` 容量、替换、关闭和并发语义；
-- `EncodedAccessUnitQueue` 顺序、满、关闭和等待语义；
+- `CapturedFrameStore` 容量、替换、clear 和 `NotEmpty` 边界通知；
+- `EncodedAccessUnitQueue` 顺序、满、pending AU、clear 和边界通知；
+- Notifier 的类型隔离、订阅生命周期和并发分发；
 - FrameScheduler 帧率和 PTS 单调性；
 - Annex-B NAL 拆分；
 - RTP Header、序列号、时间戳和 Marker；
@@ -457,6 +506,8 @@ src/publisher/
     stats/publisher_stats.*
 
   infrastructure/
+    notifier/notifier.*
+    notifier/default_notifier.*
     capture/dxgi_desktop_capture_backend.*
     capture/synthetic_desktop_capture_backend.*
     ffmpeg/sws_video_frame_processor.*
@@ -484,6 +535,9 @@ src/publisher/
 - 像素处理与编码由同一个 Worker 线程执行；
 - 采集帧资源容量 2，满时替换最旧帧；
 - 编码 AU 资源容量 4，满时保留 pending AU 并等待；
+- 资源只提供非阻塞操作和边界通知，Worker 自己负责条件等待；
+- Sink/Source 不提供关闭和清空能力，clear 只通过 Control 接口暴露给 Controller；
+- Composition 持有进程级对象图，Controller 只编排存活期间的发布会话；
 - H.264、Annex-B、90 kHz 时间基、RTP/UDP、Single NAL 和 FU-A；
 - 支持可选 `.h264` 文件输出；
 - 使用 Synthetic、Fake 和 Memory 后端保证可测试性。

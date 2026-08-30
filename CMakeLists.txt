@@ -26,17 +26,15 @@ function(semilive_add_app target source)
     add_executable(${target} ${source})
     target_compile_features(${target} PRIVATE cxx_std_23)
     semilive_enable_warnings(${target})
+    set_target_properties(${target} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
 endfunction()
-
-semilive_add_app(semilive_publisher src/publisher/main.cpp)
-semilive_add_app(semilive_relay src/relay/main.cpp)
-semilive_add_app(semilive_receiver src/receiver/main.cpp)
 
 include(CTest)
 
-if(BUILD_TESTING AND SEMILIVE_BUILD_TESTS)
-    add_test(NAME semilive_publisher_help COMMAND semilive_publisher --help)
-    add_test(NAME semilive_relay_help COMMAND semilive_relay --help)
-    add_test(NAME semilive_receiver_help COMMAND semilive_receiver --help)
-endif()
+add_subdirectory(src)
 
+if(BUILD_TESTING AND SEMILIVE_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
