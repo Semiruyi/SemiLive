@@ -38,6 +38,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-spdlog
 
       - name: Configure
         run: cmake --preset windows-debug
@@ -47,4 +48,3 @@ jobs:
 
       - name: Test
         run: ctest --preset windows-debug --no-tests=error
-

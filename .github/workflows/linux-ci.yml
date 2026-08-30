@@ -21,8 +21,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install --yes ninja-build
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ninja-build libspdlog-dev
 
       - name: Configure
         run: cmake --preset linux-debug
@@ -32,4 +32,3 @@ jobs:
 
       - name: Test
         run: ctest --preset linux-debug --no-tests=error
-

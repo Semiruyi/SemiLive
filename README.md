@@ -57,6 +57,8 @@ ctest --preset windows-debug
 Linux 开发环境需要 C++23 编译器、CMake、Ninja 和 spdlog：
 
 ```sh
+sudo apt-get update
+sudo apt-get install --yes ninja-build libspdlog-dev
 cmake --preset linux-debug
 cmake --build --preset linux-debug
 ctest --preset linux-debug
