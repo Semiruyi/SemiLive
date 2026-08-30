@@ -1,6 +1,10 @@
+#include "common/infrastructure/log/log.hpp"
+
 #include <cstdlib>
 #include <iostream>
 #include <string_view>
+
+#define SEMILIVE_LOG_TAG "publisher_main"
 
 namespace {
 
@@ -29,7 +33,17 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
+    semilive::log::Config log_config;
+    log_config.file_path = "logs/semilive_publisher.log";
+    const auto log_result = semilive::log::init(log_config);
+    if (log_result == semilive::log::InitResult::Failed) {
+        std::cerr << "Failed to initialize logging.\n";
+        return EXIT_FAILURE;
+    }
+
+    SEMILIVE_LOG_INFO("publisher process started");
     std::cout << "SemiLive publisher skeleton: implementation pending.\n";
+    SEMILIVE_LOG_INFO("publisher process stopped");
+    semilive::log::shutdown();
     return EXIT_SUCCESS;
 }
-

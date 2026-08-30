@@ -1,5 +1,7 @@
 #include "publisher/infrastructure/notifier/default_notifier.hpp"
 
+#include "common/infrastructure/log/log.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <exception>
@@ -8,6 +10,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#define SEMILIVE_LOG_TAG "notifier"
 
 namespace semilive::publisher::infra {
 
@@ -98,8 +102,11 @@ bool DefaultNotifier::send_erased(const std::type_index type, const void* event)
         dispatched = true;
         try {
             slot->callback(event);
-        } catch (const std::exception&) {
+        } catch (const std::exception& exception) {
+            SEMILIVE_LOG_ERROR(
+                "callback threw for event type {}: {}", type.name(), exception.what());
         } catch (...) {
+            SEMILIVE_LOG_ERROR("callback threw for event type {}: unknown exception", type.name());
         }
     }
     return dispatched;

@@ -79,6 +79,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首个视频阶�
 | 基础设施 | `MemoryDatagramSink` | RTP 单元和集成测试实现 |
 | 基础设施 | `H264FileWriter` | 可选 Annex-B 诊断输出 |
 | 基础设施 | `DefaultNotifier` | 按事件类型同步发布轻量边界通知 |
+| 公共基础设施 | `semilive::log` | 进程级异步日志、滚动文件、控制台输出和故障降级 |
 | 可观测性 | `PublisherStats` | 原子计数、耗时累计、峰值和统计快照 |
 | 装配层 | `PublisherComposition` | 管理进程级模块装配、所有权和逆序释放 |
 
@@ -95,6 +96,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首个视频阶�
 ```mermaid
 flowchart TB
     App[semilive_publisher / main] -->|assemble / dispose| Composition[PublisherComposition]
+    App -->|init / shutdown| Log[semilive::log]
     App -->|传入| Config[PublisherConfig]
     Config --> Composition
 
@@ -162,6 +164,10 @@ Composition 也不得暴露 Worker、Store 或 Backend 查找接口。
 - 基础设施可以依赖契约，契约不得依赖基础设施；
 - 底层模块不得依赖 `PublisherController` 或 `PublisherComposition`；
 - `PublisherComposition` 只管理进程级生命周期，不作为运行期服务定位器。
+
+日志由 Main 在 Composition 装配前初始化、在 Composition 释放后关闭，因此装配和析构阶段
+也可记录故障。日志是进程级公共基础设施，不进入 Composition 对象图，也不通过构造函数
+注入业务模块。
 
 ## 5. 运行时数据流
 
@@ -443,6 +449,9 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 
 日志不承载高频指标；逐帧、逐包日志默认关闭。
 
+日志采用异步 `OverrunOldest` 策略，避免日志队列反压采集、编码和发送线程。Worker 只记录
+生命周期、状态迁移、后端错误和周期汇总；Notifier 捕获的回调异常必须记录后继续分发。
+
 ## 13. 测试策略
 
 ### 13.1 领域单元测试
@@ -481,6 +490,10 @@ DXGI 真实桌面测试属于 Windows 专用集成测试，不作为无桌面 CI
 ## 14. 建议目录
 
 ```text
+src/common/
+  infrastructure/
+    log/...
+
 src/publisher/
   application/
     publisher_controller.*

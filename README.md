@@ -45,7 +45,8 @@ Publisher 首个视频阶段的模块边界、线程模型和运行语义已经�
 
 ## 构建
 
-Windows 开发环境使用 MSYS2 UCRT64、CMake 和 Ninja：
+Windows 开发环境使用 MSYS2 UCRT64、CMake、Ninja 和 spdlog
+（MSYS2 包 `mingw-w64-ucrt-x86_64-spdlog`）：
 
 ```powershell
 cmake --preset windows-debug
@@ -53,7 +54,7 @@ cmake --build --preset windows-debug
 ctest --preset windows-debug
 ```
 
-Linux 开发环境需要 C++23 编译器、CMake 和 Ninja：
+Linux 开发环境需要 C++23 编译器、CMake、Ninja 和 spdlog：
 
 ```sh
 cmake --preset linux-debug

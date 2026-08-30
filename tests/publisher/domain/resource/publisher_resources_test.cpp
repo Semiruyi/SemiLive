@@ -197,6 +197,22 @@ void notifier_subscription_lifetime_controls_delivery() {
     require(calls == 1, "unsubscribed callback must not run again");
 }
 
+void notifier_callback_failure_does_not_stop_delivery() {
+    DefaultNotifier notifier;
+    int calls = 0;
+
+    auto throwing_subscription = notifier.subscribe<CapturedFrameStoreNotEmpty>(
+        [](const CapturedFrameStoreNotEmpty&) { throw std::runtime_error{"expected failure"}; });
+    auto healthy_subscription = notifier.subscribe<CapturedFrameStoreNotEmpty>(
+        [&calls](const CapturedFrameStoreNotEmpty&) { ++calls; });
+
+    require(notifier.send(CapturedFrameStoreNotEmpty{}),
+            "event with a throwing callback must still be dispatched");
+    require(calls == 1, "a throwing callback must not stop later callbacks");
+    require(throwing_subscription->active() && healthy_subscription->active(),
+            "callback failure must not alter subscription lifetime");
+}
+
 void encoded_access_unit_queue_supports_concurrent_spsc_access() {
     auto notifier = std::make_shared<DefaultNotifier>();
     EncodedAccessUnitQueue queue{notifier, 8};
@@ -262,6 +278,7 @@ int main() {
         encoded_access_unit_queue_preserves_pending_item_and_notifies_edges();
         encoded_access_unit_queue_clear_reports_discard_and_releases_full_edge();
         notifier_subscription_lifetime_controls_delivery();
+        notifier_callback_failure_does_not_stop_delivery();
         encoded_access_unit_queue_supports_concurrent_spsc_access();
         zero_capacity_is_rejected();
     } catch (const std::exception& error) {
