@@ -15,7 +15,7 @@ SemiLive 是一个正在开发的 C++23 实时音视频项目，目标是完成�
 - `semilive_receiver`：接收端占位程序。
 
 Publisher 首版音视频模块边界、线程模型、共享时间轴和运行语义已经确定，实施仍先完成
-视频闭环，详见 [Publisher 音视频设计](docs/publisher-design.md)。Receiver 和 Relay 仍将在进入对应
+视频闭环，详见 [Publisher 音视频设计](docs/design/publisher/overview.md)。Receiver 和 Relay 仍将在进入对应
 里程碑前单独设计。
 
 ## 项目目标
@@ -40,7 +40,8 @@ Publisher 首版音视频模块边界、线程模型、共享时间轴和运行�
 
 ## 设计与路线图
 
-- [Publisher 音视频设计](docs/publisher-design.md)：发布端双轨模块、线程、时间轴、依赖与测试边界；
+- [文档导航](docs/README.md)：设计、决策、测试与报告入口；
+- [Publisher 音视频设计](docs/design/publisher/overview.md)：发布端双轨模块、线程、时间轴、依赖与测试边界；
 - [项目路线图](docs/roadmap.md)：项目阶段、交付物和完成条件。
 
 ## 构建

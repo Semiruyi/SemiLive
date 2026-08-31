@@ -1,4 +1,4 @@
-# SemiLive Publisher 音视频设计
+# SemiLive Publisher 音视频设计总览
 
 本文定义 SemiLive 发布端首版音视频架构基线。设计同时覆盖桌面视频和系统音频，实施顺序
 仍然是先完成可验证的视频闭环，再加入音频链路和音画同步：
@@ -443,6 +443,9 @@ Worker 线程停止之后。
 
 ## 9. 共享时间轴、时间戳与帧率
 
+视频 deadline、首帧、晚到跳帧和画面复用的权威规则见
+[FrameScheduler 设计](frame-scheduler.md)。本节只保留音视频共享时间语义和 RTP 映射摘要。
+
 Controller 在任何媒体 Worker 启动前创建不可变的会话时间原点：
 
 ```text
@@ -466,18 +469,17 @@ audio_clock_ticks = round(media_time * audio_clock_rate)
 使用浮点换算。`media_time_to_rtp_timestamp()` 将宽位 tick 偏移与随机初始时间戳相加，最终
 按无符号 32 位自然回绕。
 
-视频规则：
+视频摘要：
 
-- 默认以 30 fps 调度输出帧；
-- DXGI 在一个调度周期内没有新画面时，重复最近的有效画面；
-- 重复帧获得新的序号和 PTS；
+- 默认使用 30/1 fps 和基于绝对 deadline 的调度，不相对休眠或突发补帧；
+- PTS 来自计划调度点；DXGI 没有新画面时重复最近有效画面并获得新的序号和 PTS；
 - 编码器 time base 使用 `1/90000`；
 - RTP 初始时间戳随机生成；
 - `rtp_timestamp = video_initial_timestamp + video_clock_ticks`，按无符号 32 位自然回绕；
 - 一个 Access Unit 的所有 RTP 包共享同一时间戳；
 - 不使用系统墙上时间，不假设 RTP 时间戳永不回绕。
 
-尚未取得第一帧时，不生成空白帧；Worker 继续等待有效桌面画面或停止请求。
+尚未取得第一帧时不生成空白帧，具体调度点消耗和统计口径由 FrameScheduler 设计定义。
 
 音频规则：
 
