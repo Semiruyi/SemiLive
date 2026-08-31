@@ -22,6 +22,8 @@ WASAPI 系统音频采集 -> PCM 处理 -> 音频低延迟编码 -> RTP 封包 -
 - 缩放并转换为编码器接受的像素格式；
 - 使用 FFmpeg 后端进行 H.264 低延迟编码；
 - 输出 Annex-B Access Unit，支持保存为本地 `.h264` 文件；
+- 将非 16:9 桌面等比缩放并填充到固定输出画布，不拉伸或裁掉桌面内容；
+- DXGI 真实桌面采集支持可配置的鼠标指针合成，默认启用；
 - 按 RFC 6184 完成 Single NAL 和 FU-A RTP 封包；
 - 通过 UDP 向指定地址发送 RTP；
 - 输出采集、丢帧、编码、队列和发送统计；
@@ -106,7 +108,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 基础设施 | `FfmpegAudioEncoderBackend` | 首版选定格式的 FFmpeg 音频编码实现 |
 | 基础设施 | `UdpDatagramSink` | Winsock UDP 实现 |
 | 基础设施 | `MemoryDatagramSink` | RTP 单元和集成测试实现 |
-| 基础设施 | `H264FileWriter` | 可选 Annex-B 诊断输出 |
+| 基础设施 | `H264FileRecorder` | 通过独立有界队列异步保存可选 Annex-B 诊断输出 |
 | 基础设施 | `DefaultNotifier` | 按事件类型同步发布轻量边界通知 |
 | 公共基础设施 | `semilive::log` | 进程级异步日志、滚动文件、控制台输出和故障降级 |
 | 可观测性 | `PublisherStats` | 原子计数、耗时累计、峰值和统计快照 |
@@ -141,7 +143,7 @@ flowchart TB
         VideoProcessor[SwsVideoFrameProcessor]
         VideoEncoderBackend[FfmpegH264EncoderBackend]
         VideoPacketizer[H264NalSplitter + H264RtpPacketizer]
-        VideoFileWriter[Optional H264FileWriter]
+        VideoFileRecorder[Optional Async H264FileRecorder]
         VideoDatagram[Video DatagramSink]
         VideoCapture[VideoCaptureWorker]
         VideoEncoder[VideoEncoderWorker]
@@ -156,7 +158,7 @@ flowchart TB
         VideoEncoder --> VideoAuQueue
         VideoAuQueue --> VideoSender
         VideoPacketizer -.-> VideoSender
-        VideoFileWriter -.-> VideoSender
+        VideoFileRecorder -.-> VideoSender
         VideoDatagram -.-> VideoSender
     end
 
@@ -257,7 +259,8 @@ flowchart LR
 | Main | `semilive_publisher` | Controller、配置和统计展示 | 可以等待启动、停止和会话终态 |
 | Video Capture Thread | `VideoCaptureWorker` | DXGI 后端、FrameScheduler、最近桌面画面 | 可以等待采集或帧率时刻；不得被下游长期阻塞 |
 | Video Encode Thread | `VideoEncoderWorker` | swscale 和 FFmpeg 视频编码上下文 | 输入为空或视频 AU 输出满时等待 |
-| Video Send Thread | `VideoRtpSenderWorker` | H.264 Packetizer、视频 UDP socket、文件句柄 | 输入为空时等待；发送失败按错误策略处理 |
+| Video Send Thread | `VideoRtpSenderWorker` | H.264 Packetizer 和视频 UDP socket | 输入为空时等待；发送失败按错误策略处理 |
+| Diagnostic File Thread | `H264FileRecorder` | 诊断队列和 `.h264` 文件句柄 | 只消费有界诊断队列；不得反压视频编码或 RTP 发送 |
 | Audio Capture Thread | `AudioCaptureWorker` | WASAPI 后端和设备时钟映射状态 | 可以等待 WASAPI 事件；不得被下游长期阻塞 |
 | Audio Encode Thread | `AudioEncoderWorker` | swresample 和 FFmpeg 音频编码上下文 | 输入为空时等待；不得造成无界 PCM 积压 |
 | Audio Send Thread | `AudioRtpSenderWorker` | 音频 Packetizer 和音频 UDP socket | 输入为空时等待；发送失败按错误策略处理 |
@@ -501,6 +504,8 @@ audio_clock_ticks = round(media_time * audio_clock_rate)
 |---|---:|
 | 输出分辨率 | 1920 x 1080 |
 | 帧率 | 30 fps |
+| 编码器 | FFmpeg `libx264` |
+| 编码输入像素格式 | YUV420P |
 | 视频码率 | 4 Mbps |
 | GOP | 60 帧 |
 | B 帧 | 0 |
@@ -520,16 +525,35 @@ RTP 规则：
 - SPS/PPS 在 IDR 前以带内方式提供；
 - 首轮视频闭环不实现 STAP-A、RTCP 和丢包恢复。
 
-具体 FFmpeg H.264 编码器名称在实现前根据开发和 CI 环境确认；首版只选择一个软件编码
-后端，不同时维护多个编码器分支。
+`VideoEncoderBackend` 保持可替换，但首版真实编码实现只请求 FFmpeg `libx264`，不同时维护
+多个编码器分支。普通无设备 CI 使用 Fake Encoder；启用 FFmpeg 集成验证的环境找不到
+`libx264` 时必须给出明确配置错误。关闭 B 帧以避免帧重排，简化首版实时链路的 PTS/DTS
+关系并降低延迟。硬件编码留作视频闭环稳定后的独立增强项。
 
-### 10.2 音频参数
+输入桌面不是 16:9 时，`VideoFrameProcessor` 等比缩放到 1920 x 1080 画布并居中填充，禁止
+拉伸或裁掉桌面边缘。填充颜色固定为黑色，缩放区域和填充边界必须可单元测试。DXGI 后端
+提供鼠标指针合成配置，真实桌面发布默认开启；Synthetic 和早期无设备编码闭环不依赖指针。
+
+### 10.2 视频诊断文件
+
+M1 只启用 `.h264` 文件输出，用 ffprobe 和 ffplay 验证编码结果；M2 以 RTP 为主输出，允许
+同时启用可选 `.h264` 诊断记录。双输出不引入通用媒体 Graph，也不增加第二个领域 AU
+消费者：`VideoRtpSenderWorker` 在处理 AU 时向 `H264FileRecorder` 提交一份 Annex-B 数据
+副本，Recorder 通过独立线程和有界队列写盘。提交操作始终非阻塞；默认队列同时受 64 个
+AU 和 8 MiB 字节预算约束，达到任一上限即视为记录过载。
+
+文件记录属于 best-effort 诊断能力，不参与发布会话正确性：诊断队列已满、文件打开失败或
+写入失败时，Recorder 停止本次记录、保留并明确标记不完整文件、更新统计并报告非致命
+诊断错误；视频编码和 RTP 发送继续运行。性能和 30 分钟稳定性验收默认关闭文件记录，避免
+把磁盘吞吐计入实时链路结果。
+
+### 10.3 音频参数
 
 首版音频格式必须同时满足 FFmpeg 开发/CI 环境可用、SemiPlayer 可解码、存在明确 RTP
 Payload 格式和适合低延迟四个条件。编码格式、采样率、声道数、编码帧长、码率、Payload
 Type 和 RTP 时钟频率列为音频实现前确认项，不在未验证环境前写死。
 
-### 10.3 双轨传输
+### 10.4 双轨传输
 
 一个发布会话包含零或一条视频轨道以及零或一条音频轨道，至少启用一条。首版不支持同类
 多轨。每条轨道拥有独立的：
@@ -566,10 +590,13 @@ PublisherController: start_publishing / stop_publishing / state / stats
 `SessionTimeline`，再按消费者到生产者的阶段顺序配置并启动所有已启用轨道：
 
 ```text
+0. 可选 H264FileRecorder
 1. VideoRtpSenderWorker / AudioRtpSenderWorker
 2. VideoEncoderWorker / AudioEncoderWorker
 3. VideoCaptureWorker / AudioCaptureWorker
 ```
+
+诊断 Recorder 打开文件失败时只禁用本次记录并报告非致命错误，不阻止 Sender 启动。
 
 同一阶段内先发出启动命令，再逐一等待确认，避免人为制造过大的轨道启动偏差。不要求两个
 采集后端在同一时刻产生首个媒体单元；它们依靠共享时间轴表达实际开始位置。
@@ -586,9 +613,10 @@ Ctrl+C 触发正常停止：
 2. 等待所有已启用的 Capture Worker 确认不再产生新媒体
 3. 命令两个 Encoder Worker 分别排空输入并 flush 编码器
 4. 等待两个 Encoder Worker 回到 Idle
-5. 命令两个 RTP Sender Worker 分别排空编码输出并关闭文件和 socket
+5. 命令两个 RTP Sender Worker 分别排空编码输出并关闭 socket
 6. 等待两个 Sender Worker 回到 Idle
-7. Controller 通过 Control 接口防御性 clear 所有空资源并回到 Idle
+7. 命令可选 H264FileRecorder 排空已接受的诊断数据并关闭文件
+8. Controller 通过 Control 接口防御性 clear 所有空资源并回到 Idle
 ```
 
 同一阶段先向两条轨道发出命令，再等待确认；不先完整停止视频后再停止音频。因为所有领域
@@ -636,6 +664,7 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 - 编码平均、最大耗时；
 - H.264 输出字节数和估算码率；
 - RTP 包数、发送字节数和 UDP 错误数；
+- 诊断文件接受、写入和拒绝的 AU 与字节数，以及打开、写入和过载失败次数；
 - 两个视频领域资源的当前水位和峰值水位；
 - 采集到编码完成、采集到发送完成的平均和最大延迟。
 
@@ -764,7 +793,7 @@ src/publisher/
     ffmpeg/ffmpeg_audio_encoder_backend.*
     transport/udp_datagram_sink.*
     transport/memory_datagram_sink.*
-    output/h264_file_writer.*
+    output/h264_file_recorder.*
 
   composition/
     publisher_composition.*
@@ -799,16 +828,16 @@ CMake 的部署目标对应三个最终程序。Publisher 额外提供一个不�
 - Sink/Source 不提供关闭和清空能力，clear 只通过 Control 接口暴露给 Controller；
 - Composition 持有进程级对象图，Controller 只编排存活期间的发布会话；
 - H.264、Annex-B、90 kHz 时间基、RTP/UDP、Single NAL 和 FU-A；
-- 支持可选 `.h264` 文件输出；
+- 首版真实视频编码使用 FFmpeg `libx264`、YUV420P、1080p30、4 Mbps、GOP 60、无 B 帧；
+- 非 16:9 桌面等比缩放并居中黑边填充，不拉伸或裁剪；
+- DXGI 鼠标指针合成可配置，真实桌面发布默认开启；
+- M1 使用 `.h264` 文件验证，M2 允许 RTP 与异步 best-effort 诊断记录同时开启；
+- 诊断文件队列或写入失败只终止记录，不得反压或终止视频发布；
 - 音频采集不得被下游长期阻塞，所有音频积压有界且必须保留不连续语义；
 - 使用 Synthetic、Fake 和 Memory 后端保证两条链路可测试性。
 
 ### 实现前确认
 
-- 开发环境和 CI 统一使用的 FFmpeg H.264 编码器名称；
-- 目标屏幕不是 16:9 时采用裁剪、拉伸还是等比缩放加填充；
-- DXGI 首版是否合成鼠标指针；
-- `.h264` 文件输出与 RTP 是否允许同时开启。
 - 首版音频编码格式及 FFmpeg、SemiPlayer、RTP Payload 兼容性；
 - 音频采样率、声道数、编码帧长、码率、Payload Type 和 RTP 时钟频率；
 - WASAPI 设备位置到共享会话时间的精确映射；
