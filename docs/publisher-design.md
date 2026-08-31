@@ -1,18 +1,21 @@
-# SemiLive Publisher 首版设计
+# SemiLive Publisher 音视频设计
 
-本文定义 SemiLive 发布端首个视频阶段的架构基线。当前目标是在 Windows 上完成可验证的
-桌面视频发布链路：
+本文定义 SemiLive 发布端首版音视频架构基线。设计同时覆盖桌面视频和系统音频，实施顺序
+仍然是先完成可验证的视频闭环，再加入音频链路和音画同步：
 
 ```text
 DXGI 桌面采集 -> BGRA 处理 -> H.264 低延迟编码 -> RFC 6184 RTP 封包 -> UDP 发送
+
+WASAPI 系统音频采集 -> PCM 处理 -> 音频低延迟编码 -> RTP 封包 -> UDP 发送
 ```
 
-本文只描述已经决定的模块边界、线程模型和运行语义。实现过程中如果改变这些约定，应先
-更新本文并记录原因。
+本文描述两条媒体链路共同遵守的会话、时间轴、模块边界、线程模型和运行语义。尚未决定的
+音频编解码和时钟映射细节明确列为实现前确认项，不为未实现功能预先创建占位代码。
+实现过程中如果改变这些约定，应先更新本文并记录原因。
 
 ## 1. 范围
 
-### 1.1 本阶段目标
+### 1.1 设计目标
 
 - 使用 DXGI Desktop Duplication 采集 Windows 桌面；
 - 按固定帧率产生 BGRA 视频帧；
@@ -23,26 +26,36 @@ DXGI 桌面采集 -> BGRA 处理 -> H.264 低延迟编码 -> RFC 6184 RTP 封包
 - 通过 UDP 向指定地址发送 RTP；
 - 输出采集、丢帧、编码、队列和发送统计；
 - 支持 Ctrl+C、工作线程失败和正常停止时的确定性退出。
+- 定义 WASAPI Loopback 音频采集、处理、编码和 RTP 发送的模块边界；
+- 建立音视频共享的会话时间轴和独立的 RTP 轨道；
+- 保证音频拥塞不会阻塞视频，视频拥塞也不会阻塞音频；
+- 明确双轨会话的启动、停止、排空、失败和统计语义。
 
-### 1.2 非目标
+### 1.2 实施顺序
+
+首轮实现只装配并启用视频链路，依次验证本地 H.264、直接视频收发、Linux Relay 转发和
+SemiPlayer 播放。音频模块在视频闭环稳定后实现，但视频阶段不得破坏本文确定的共享会话
+时间轴、轨道配置和生命周期边界。
+
+### 1.3 非目标
 
 本阶段不实现：
 
-- 系统音频采集、音频编码和音画同步；
+- 首轮视频实现中的系统音频采集、音频编码和音画同步；
 - 摄像头采集和采集源运行时切换；
 - 硬件编码及 GPU 零拷贝；
-- RTCP、重传、拥塞控制和自适应码率；
+- 首轮视频闭环中的 RTCP、重传、拥塞控制和自适应码率；
 - RTSP、WebRTC、信令和 NAT 穿透；
 - Linux Relay 和多接收端会话管理；
 - GUI、预览窗口和完整 SDK 接口；
 - 运行中无缝改变分辨率、帧率或编码器。
 
-设计上不阻碍后续音频链路，但当前不预先提取 `IMediaSource`、`IMediaEncoder` 等过度
-通用的音视频抽象。
+设计上明确容纳音频链路，但不预先提取 `IMediaSource`、`IMediaEncoder`、通用媒体 Graph
+或继承式轨道框架。音频和视频共享会话约定，媒体处理接口保持类型明确。
 
 ## 2. 设计原则
 
-Publisher 参考 SemiPlayer 已验证的模块风格，并针对首个视频阶段裁剪复杂度：
+Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频范围裁剪复杂度：
 
 - 应用编排、领域 Worker、领域资源、后端契约和基础设施分层；
 - Worker 依赖后端契约，不直接依赖 DXGI、FFmpeg 或 Winsock 具体类型；
@@ -52,29 +65,45 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首个视频阶�
 - 领域资源只提供非阻塞数据操作，不拥有条件变量或 Worker 停止语义；
 - 通知只用于唤醒，正确性始终依赖重新检查真实谓词；
 - 构造期注入依赖，运行期不使用服务定位器；
-- 第一版不引入 C ABI、异步命令句柄、Generation 和通用媒体 Graph。
+- 第一版不引入 C ABI、异步命令句柄、Generation 和通用媒体 Graph；
+- 一个发布会话可以包含视频和音频轨道，两个轨道拥有独立资源、Worker、RTP 状态和 Socket；
+- 两条轨道共享同一个单调会话时间轴，但使用各自的 RTP 时钟频率和随机初始时间戳；
+- 首版任一已启用轨道发生致命错误时，整个发布会话失败。
 
 ## 3. 分层与模块
 
 | 层次 | 模块 | 职责 |
 |---|---|---|
 | 应用层 | `PublisherController` | 校验会话状态，编排启动、停止、等待和失败汇聚 |
-| 领域 Worker | `CaptureWorker` | 按目标帧率采集并发布 BGRA 帧 |
+| 领域 Worker | `VideoCaptureWorker` | 按目标帧率采集并发布 BGRA 帧 |
 | 领域 Worker | `VideoEncoderWorker` | 消费 BGRA 帧，完成像素处理和 H.264 编码 |
-| 领域 Worker | `RtpSenderWorker` | 保存可选码流、拆分 NAL、RTP 封包和 UDP 发送 |
-| 领域资源 | `CapturedFrameStore` | 容量受限的最新采集帧存储 |
-| 领域资源 | `EncodedAccessUnitQueue` | 容量受限且保持编码顺序的 AU 队列 |
+| 领域 Worker | `VideoRtpSenderWorker` | 保存可选码流、拆分 NAL、RTP 封包和 UDP 发送 |
+| 领域 Worker | `AudioCaptureWorker` | 事件驱动采集 WASAPI Loopback PCM，并保留设备时钟信息 |
+| 领域 Worker | `AudioEncoderWorker` | 消费 PCM，完成格式处理、重采样和音频编码 |
+| 领域 Worker | `AudioRtpSenderWorker` | 音频 RTP 封包和 UDP 发送 |
+| 领域资源 | `CapturedVideoFrameStore` | 容量受限的最新视频帧存储 |
+| 领域资源 | `EncodedVideoAccessUnitQueue` | 容量受限且保持编码顺序的视频 AU 队列 |
+| 领域资源 | `CapturedAudioBlockQueue` | 容量受限的 PCM 块队列，过载时保持实时性并标记间断 |
+| 领域资源 | `EncodedAudioPacketQueue` | 容量受限的编码音频包队列 |
 | 领域服务 | `FrameScheduler` | 固定帧率调度及采集时间戳生成 |
+| 领域服务 | `SessionClock` | 提供音视频共享的单调会话原点和媒体时间换算 |
 | 领域服务 | `H264NalSplitter` | 拆分 Annex-B Access Unit 中的 NAL |
 | 领域服务 | `H264RtpPacketizer` | RFC 6184 Single NAL/FU-A 封包 |
+| 领域服务 | `AudioRtpPacketizer` | 按选定音频格式生成 RTP Payload |
 | 后端契约 | `DesktopCaptureBackend` | 提供最新桌面图像 |
+| 后端契约 | `SystemAudioCaptureBackend` | 提供带设备位置和单调时钟关联的 PCM 块 |
 | 后端契约 | `VideoFrameProcessor` | 缩放和像素格式转换 |
+| 后端契约 | `AudioFrameProcessor` | 声道布局、采样格式和采样率转换 |
 | 后端契约 | `VideoEncoderBackend` | 接收处理后的视频帧并输出 H.264 AU |
+| 后端契约 | `AudioEncoderBackend` | 接收处理后的 PCM 并输出编码音频包 |
 | 后端契约 | `DatagramSink` | 发送一个完整数据报 |
 | 基础设施 | `DxgiDesktopCaptureBackend` | D3D11/DXGI Desktop Duplication 实现 |
 | 基础设施 | `SyntheticDesktopCaptureBackend` | 可重复测试画面实现 |
 | 基础设施 | `SwsVideoFrameProcessor` | FFmpeg libswscale 像素处理实现 |
 | 基础设施 | `FfmpegH264EncoderBackend` | FFmpeg H.264 编码实现 |
+| 基础设施 | `WasapiLoopbackCaptureBackend` | Windows 系统音频采集实现 |
+| 基础设施 | `SwrAudioFrameProcessor` | FFmpeg libswresample 音频处理实现 |
+| 基础设施 | `FfmpegAudioEncoderBackend` | 首版选定格式的 FFmpeg 音频编码实现 |
 | 基础设施 | `UdpDatagramSink` | Winsock UDP 实现 |
 | 基础设施 | `MemoryDatagramSink` | RTP 单元和集成测试实现 |
 | 基础设施 | `H264FileWriter` | 可选 Annex-B 诊断输出 |
@@ -102,51 +131,70 @@ flowchart TB
 
     Composition -->|创建并持有| Notifier[DefaultNotifier]
     Composition -->|创建| Stats[PublisherStats]
-    Composition -->|创建| FrameStore[CapturedFrameStore]
-    Composition -->|创建| AuQueue[EncodedAccessUnitQueue]
-    Notifier -. 注入 .-> FrameStore
-    Notifier -. 注入 .-> AuQueue
+    Composition -->|创建| Clock[SessionClock]
 
-    Composition -->|按配置创建| CaptureBackend[DxgiDesktopCaptureBackend<br/>或 SyntheticDesktopCaptureBackend]
-    Composition -->|创建| Processor[SwsVideoFrameProcessor]
-    Composition -->|创建| EncoderBackend[FfmpegH264EncoderBackend]
-    Composition -->|按配置创建| Datagram[UdpDatagramSink<br/>或 MemoryDatagramSink]
-    Composition -->|创建| FileWriter[H264FileWriter]
-    Composition -->|创建| Splitter[H264NalSplitter]
-    Composition -->|创建| Packetizer[H264RtpPacketizer]
-    Composition -->|创建| Scheduler[FrameScheduler]
+    subgraph Video[Video Pipeline]
+        VideoFrameStore[CapturedVideoFrameStore]
+        VideoAuQueue[EncodedVideoAccessUnitQueue]
+        VideoCaptureBackend[Dxgi 或 Synthetic Capture Backend]
+        VideoScheduler[FrameScheduler]
+        VideoProcessor[SwsVideoFrameProcessor]
+        VideoEncoderBackend[FfmpegH264EncoderBackend]
+        VideoPacketizer[H264NalSplitter + H264RtpPacketizer]
+        VideoFileWriter[Optional H264FileWriter]
+        VideoDatagram[Video DatagramSink]
+        VideoCapture[VideoCaptureWorker]
+        VideoEncoder[VideoEncoderWorker]
+        VideoSender[VideoRtpSenderWorker]
 
-    Composition -->|创建| Capture[CaptureWorker]
-    Composition -->|创建| Encoder[VideoEncoderWorker]
-    Composition -->|创建| Sender[RtpSenderWorker]
+        VideoCaptureBackend -.-> VideoCapture
+        VideoScheduler -.-> VideoCapture
+        VideoCapture --> VideoFrameStore
+        VideoFrameStore --> VideoEncoder
+        VideoProcessor -.-> VideoEncoder
+        VideoEncoderBackend -.-> VideoEncoder
+        VideoEncoder --> VideoAuQueue
+        VideoAuQueue --> VideoSender
+        VideoPacketizer -.-> VideoSender
+        VideoFileWriter -.-> VideoSender
+        VideoDatagram -.-> VideoSender
+    end
 
-    CaptureBackend -. 注入 .-> Capture
-    Scheduler -. 注入 .-> Capture
-    FrameStore -. Sink 注入 .-> Capture
-    Stats -. 注入 .-> Capture
-    Notifier -. 注入 .-> Capture
+    subgraph Audio[Audio Pipeline - 视频闭环后实现]
+        AudioBlockQueue[CapturedAudioBlockQueue]
+        AudioPacketQueue[EncodedAudioPacketQueue]
+        AudioCaptureBackend[WASAPI 或 Synthetic Audio Backend]
+        AudioProcessor[SwrAudioFrameProcessor]
+        AudioEncoderBackend[FfmpegAudioEncoderBackend]
+        AudioPacketizer[AudioRtpPacketizer]
+        AudioDatagram[Audio DatagramSink]
+        AudioCapture[AudioCaptureWorker]
+        AudioEncoder[AudioEncoderWorker]
+        AudioSender[AudioRtpSenderWorker]
 
-    FrameStore -. Source 注入 .-> Encoder
-    Processor -. 注入 .-> Encoder
-    EncoderBackend -. 注入 .-> Encoder
-    AuQueue -. Sink 注入 .-> Encoder
-    Stats -. 注入 .-> Encoder
-    Notifier -. 注入 .-> Encoder
+        AudioCaptureBackend -.-> AudioCapture
+        AudioCapture --> AudioBlockQueue
+        AudioBlockQueue --> AudioEncoder
+        AudioProcessor -.-> AudioEncoder
+        AudioEncoderBackend -.-> AudioEncoder
+        AudioEncoder --> AudioPacketQueue
+        AudioPacketQueue --> AudioSender
+        AudioPacketizer -.-> AudioSender
+        AudioDatagram -.-> AudioSender
+    end
 
-    AuQueue -. Source 注入 .-> Sender
-    FileWriter -. 注入 .-> Sender
-    Splitter -. 注入 .-> Sender
-    Packetizer -. 注入 .-> Sender
-    Datagram -. 注入 .-> Sender
-    Stats -. 注入 .-> Sender
-    Notifier -. 注入 .-> Sender
+    Composition --> Video
+    Composition --> Audio
+    Notifier -. 注入 .-> Video
+    Notifier -. 注入 .-> Audio
+    Stats -. 注入 .-> Video
+    Stats -. 注入 .-> Audio
+    Clock -. 共享媒体时间 .-> Video
+    Clock -. 共享媒体时间 .-> Audio
 
     Composition -->|创建并持有| Controller[PublisherController]
-    Capture -. 控制接口注入 .-> Controller
-    Encoder -. 控制接口注入 .-> Controller
-    Sender -. 控制接口注入 .-> Controller
-    FrameStore -. Control 接口注入 .-> Controller
-    AuQueue -. Control 接口注入 .-> Controller
+    Video -. 控制接口注入 .-> Controller
+    Audio -. 控制接口注入 .-> Controller
     Stats -. 注入 .-> Controller
     App -. controller 非拥有访问 .-> Controller
 ```
@@ -157,10 +205,13 @@ Composition 也不得暴露 Worker、Store 或 Backend 查找接口。
 
 依赖约束：
 
-- `CaptureWorker` 不知道编码器和 RTP；
+- `VideoCaptureWorker` 和 `AudioCaptureWorker` 不知道编码器和 RTP；
 - `VideoEncoderWorker` 不知道 DXGI 和 UDP；
+- `AudioEncoderWorker` 不知道 WASAPI 和 UDP；
 - `H264RtpPacketizer` 不知道 socket；
+- `AudioRtpPacketizer` 不知道 socket；
 - `DatagramSink` 不理解 H.264；
+- 视频和音频 Worker 不互相调用，也不共享媒体队列或有状态后端；
 - 基础设施可以依赖契约，契约不得依赖基础设施；
 - 底层模块不得依赖 `PublisherController` 或 `PublisherComposition`；
 - `PublisherComposition` 只管理进程级生命周期，不作为运行期服务定位器。
@@ -174,22 +225,29 @@ Composition 也不得暴露 Worker、Store 或 Backend 查找接口。
 ```mermaid
 flowchart LR
     Desktop[Windows Desktop] --> Dxgi[DXGI Capture Backend]
-    Synthetic[Synthetic Source] -. tests .-> CaptureWorker[CaptureWorker Thread]
-    Dxgi --> CaptureWorker
-    CaptureWorker -->|CapturedFrame| FrameStore[CapturedFrameStore\ncapacity = 2\ndrop oldest]
-    FrameStore --> EncoderWorker[VideoEncoderWorker Thread]
-    EncoderWorker --> Processor[BGRA -> YUV420P/NV12]
-    Processor --> H264[FFmpeg H.264 Encoder]
-    H264 -->|EncodedAccessUnit| AuQueue[EncodedAccessUnitQueue\ncapacity = 4\nreject when full]
-    AuQueue --> SenderWorker[RtpSenderWorker Thread]
-    SenderWorker --> Writer[Optional .h264 Writer]
-    SenderWorker --> Splitter[Annex-B NAL Splitter]
-    Splitter --> Packetizer[RFC 6184 Packetizer]
-    Packetizer --> Udp[UDP Datagram Sink]
+    Dxgi --> VideoCapture[VideoCaptureWorker]
+    VideoCapture -->|CapturedVideoFrame| FrameStore[CapturedVideoFrameStore\ncapacity = 2\ndrop oldest]
+    FrameStore --> VideoEncoder[VideoEncoderWorker]
+    VideoEncoder --> H264[BGRA Process + H.264 Encode]
+    H264 -->|EncodedVideoAccessUnit| VideoAuQueue[EncodedVideoAccessUnitQueue\ncapacity = 4\nreject when full]
+    VideoAuQueue --> VideoSender[VideoRtpSenderWorker]
+    VideoSender --> VideoUdp[Video UDP Datagram Sink]
+
+    SystemAudio[Windows System Audio] --> Wasapi[WASAPI Loopback Backend]
+    Wasapi --> AudioCapture[AudioCaptureWorker]
+    AudioCapture -->|CapturedAudioBlock| AudioBlockQueue[CapturedAudioBlockQueue\nbounded\ndrop old on overload]
+    AudioBlockQueue --> AudioEncoder[AudioEncoderWorker]
+    AudioEncoder --> AudioCodec[PCM Process + Audio Encode]
+    AudioCodec -->|EncodedAudioPacket| AudioPacketQueue[EncodedAudioPacketQueue\nbounded]
+    AudioPacketQueue --> AudioSender[AudioRtpSenderWorker]
+    AudioSender --> AudioUdp[Audio UDP Datagram Sink]
+
+    Clock[Shared SessionClock] -. media time .-> VideoCapture
+    Clock -. media time .-> AudioCapture
 ```
 
 第一版通过 CPU 内存传递像素。DXGI 后端在释放 acquired frame 前，将有效区域复制到
-由 `CapturedFrame` 独占的紧凑 BGRA 缓冲。GPU 纹理跨模块传递和硬件编码留待性能数据
+由 `CapturedVideoFrame` 独占的紧凑 BGRA 缓冲。GPU 纹理跨模块传递和硬件编码留待性能数据
 证明必要后再设计。
 
 ## 6. 线程模型
@@ -197,12 +255,17 @@ flowchart LR
 | 执行上下文 | 所属模块 | 独占对象 | 阻塞规则 |
 |---|---|---|---|
 | Main | `semilive_publisher` | Controller、配置和统计展示 | 可以等待启动、停止和会话终态 |
-| Capture Thread | `CaptureWorker` | DXGI 后端、FrameScheduler、最近桌面画面 | 可以等待采集或帧率时刻；不得被下游长期阻塞 |
-| Encode Thread | `VideoEncoderWorker` | swscale 和 FFmpeg 编码上下文 | 输入为空或 AU 输出满时等待 |
-| Send Thread | `RtpSenderWorker` | Packetizer状态、UDP socket、文件句柄 | 输入为空时等待；发送失败按错误策略处理 |
+| Video Capture Thread | `VideoCaptureWorker` | DXGI 后端、FrameScheduler、最近桌面画面 | 可以等待采集或帧率时刻；不得被下游长期阻塞 |
+| Video Encode Thread | `VideoEncoderWorker` | swscale 和 FFmpeg 视频编码上下文 | 输入为空或视频 AU 输出满时等待 |
+| Video Send Thread | `VideoRtpSenderWorker` | H.264 Packetizer、视频 UDP socket、文件句柄 | 输入为空时等待；发送失败按错误策略处理 |
+| Audio Capture Thread | `AudioCaptureWorker` | WASAPI 后端和设备时钟映射状态 | 可以等待 WASAPI 事件；不得被下游长期阻塞 |
+| Audio Encode Thread | `AudioEncoderWorker` | swresample 和 FFmpeg 音频编码上下文 | 输入为空时等待；不得造成无界 PCM 积压 |
+| Audio Send Thread | `AudioRtpSenderWorker` | 音频 Packetizer 和音频 UDP socket | 输入为空时等待；发送失败按错误策略处理 |
 
 每个 Worker 拥有自己的线程，但线程只执行该 Worker 的私有循环。后端对象在所属线程中
 打开、使用和关闭，避免跨线程调用 D3D11 context、FFmpeg codec context 和 socket 状态。
+需要 COM 的 Worker 在线程入口初始化适合后端要求的 Apartment，并在线程退出前逆序关闭
+后端和 COM；WASAPI 对象不得跨到其他 Worker 线程调用。
 
 首版 Worker 状态机保持最小：
 
@@ -211,14 +274,19 @@ Constructed -> Starting -> Running -> Stopping -> Stopped
                               \-> Failed
 ```
 
-本阶段是进程内单次发布会话，不为 Worker 增加通用命令队列和多会话状态机。
+本阶段是进程内单次发布会话，不为 Worker 增加通用命令队列和多会话状态机。音频与视频各自
+使用独立 Socket 和线程，不要求 `DatagramSink` 支持多线程并发调用。
 
 ## 7. 领域数据
 
-### 7.1 CapturedFrame
+`MediaTime` 是相对于当前发布会话单调原点的有符号纳秒时长。它表达媒体呈现位置，不携带
+墙上时间，也不等同于任何具体 RTP 时钟值。负值只允许出现在设备时钟初始校准的内部计算
+中，不得进入已发布的媒体对象。
+
+### 7.1 CapturedVideoFrame
 
 ```cpp
-struct CapturedFrame {
+struct CapturedVideoFrame {
     std::vector<std::byte> bgra;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
@@ -235,12 +303,12 @@ struct CapturedFrame {
 - `sequence` 按调度输出帧递增，重复桌面画面也产生新序号；
 - `captured_at` 来自单调时钟，不使用系统墙上时间。
 
-### 7.2 EncodedAccessUnit
+### 7.2 EncodedVideoAccessUnit
 
 ```cpp
-struct EncodedAccessUnit {
+struct EncodedVideoAccessUnit {
     std::vector<std::byte> annex_b;
-    std::int64_t pts_90khz = 0;
+    MediaTime presentation_time;
     bool key_frame = false;
     std::uint64_t source_sequence = 0;
     std::chrono::steady_clock::time_point captured_at;
@@ -251,36 +319,77 @@ struct EncodedAccessUnit {
 
 - 一个对象表示同一显示时刻的完整 H.264 Access Unit；
 - `annex_b` 使用 start code 分隔 NAL；
-- `pts_90khz` 和 RTP 视频时钟使用相同的 90 kHz 时间基；
+- `presentation_time` 是相对共享会话原点的媒体时间；编码器和 RTP 边界再换算为 90 kHz；
 - `captured_at` 贯穿编码和发送，用于计算阶段延迟。
+
+### 7.3 CapturedAudioBlock
+
+```cpp
+struct CapturedAudioBlock {
+    std::vector<std::byte> samples;
+    std::uint32_t sample_rate = 0;
+    std::uint16_t channels = 0;
+    AudioSampleFormat sample_format{};
+    std::uint32_t sample_count = 0;
+    std::uint64_t sequence = 0;
+    MediaTime first_sample_time;
+    std::chrono::steady_clock::time_point captured_at;
+    bool discontinuity = false;
+};
+```
+
+约束：
+
+- 一个对象包含声道交错规则明确、时间连续的一段 PCM；
+- `first_sample_time` 表示第一个 Sample 在共享会话时间轴上的呈现时间；
+- `sample_count` 按单个声道计数，块持续时间由 `sample_count / sample_rate` 得到；
+- WASAPI 报告不连续、队列主动丢弃或设备恢复后，第一个后续块设置 `discontinuity`；
+- `captured_at` 只用于处理延迟统计，不能替代音频呈现时间。
+
+### 7.4 EncodedAudioPacket
+
+```cpp
+struct EncodedAudioPacket {
+    std::vector<std::byte> payload;
+    std::uint32_t sample_count = 0;
+    MediaTime presentation_time;
+    std::uint64_t source_sequence = 0;
+    std::chrono::steady_clock::time_point captured_at;
+    bool discontinuity = false;
+};
+```
+
+一个对象表示一次音频编码输出单元，不等同于 RTP 包。`AudioRtpPacketizer` 根据选定格式决定
+一个编码输出单元生成一个还是多个 RTP 包。具体字段可随音频格式补充，但不得丢失共享媒体
+时间和不连续语义。
 
 ## 8. 领域资源与背压
 
-### 8.1 CapturedFrameStore
+### 8.1 CapturedVideoFrameStore
 
 接口拆分为：
 
 ```text
-CapturedFrameSink   仅供 CaptureWorker
-CapturedFrameSource 仅供 VideoEncoderWorker
-CapturedFrameStoreControl 仅供 PublisherController
+CapturedVideoFrameSink   仅供 VideoCaptureWorker
+CapturedVideoFrameSource 仅供 VideoEncoderWorker
+CapturedVideoFrameStoreControl 仅供 PublisherController
 ```
 
 首版容量为 2。Store 已满时，接受最新帧并替换最旧的未编码帧，同时增加丢帧统计。
 直播链路优先保留最新画面，不能因为编码短暂变慢而持续增加端到端延迟。
 
 资源只提供非阻塞的 `try_push()`、`try_pop()`、`empty()` 和状态查询。Store 从空变为非空
-时发送 `CapturedFrameStoreNotEmpty`；Worker 的通知回调只设置 hint 并唤醒自己的条件变量。
+时发送 `CapturedVideoFrameStoreNotEmpty`；Worker 的通知回调只设置 hint 并唤醒自己的条件变量。
 `clear()` 只属于 Control 接口，用于停止或失败会话后的防御性清理，并返回被丢弃的帧数。
 
-### 8.2 EncodedAccessUnitQueue
+### 8.2 EncodedVideoAccessUnitQueue
 
 接口拆分为：
 
 ```text
-EncodedAccessUnitSink   仅供 VideoEncoderWorker
-EncodedAccessUnitSource 仅供 RtpSenderWorker
-EncodedAccessUnitQueueControl 仅供 PublisherController
+EncodedVideoAccessUnitSink   仅供 VideoEncoderWorker
+EncodedVideoAccessUnitSource 仅供 VideoRtpSenderWorker
+EncodedVideoAccessUnitQueueControl 仅供 PublisherController
 ```
 
 首版容量为 4。Queue 已满时拒绝新项，`VideoEncoderWorker` 保留
@@ -292,49 +401,94 @@ EncodedAccessUnitQueueControl 仅供 PublisherController
 ```text
 AU Queue 满
 -> Encoder 等待
--> CapturedFrameStore 开始替换旧帧
+-> CapturedVideoFrameStore 开始替换旧帧
 -> 内存保持有界，延迟不持续累积
 ```
 
-Queue 从空变为非空时发送 `EncodedAccessUnitQueueNotEmpty`，从满变为非满时发送
-`EncodedAccessUnitQueueNotFull`。`clear()` 清空满队列时也发送一次 `NotFull`，并返回被丢弃
-的 AU 数量。
+Queue 从空变为非空时发送 `EncodedVideoAccessUnitQueueNotEmpty`，从满变为非满时发送
+`EncodedVideoAccessUnitQueueNotFull`。`clear()` 清空满队列时也发送一次 `NotFull`，并返回
+被丢弃的 AU 数量。
 
-两个资源都不包含条件变量、`stop_token`、阻塞等待、`close()` 或 `closed` 状态。每个
+### 8.3 CapturedAudioBlockQueue
+
+接口同样拆分为 Sink、Source 和 Control，分别只交给 `AudioCaptureWorker`、
+`AudioEncoderWorker` 和 `PublisherController`。容量以可缓存的音频时长定义，再根据实际块长
+换算为元素数量；精确上限在确定 WASAPI 周期和编码帧长后决定。
+
+音频采集不能被编码端长期阻塞。队列满时接受最新 PCM 并丢弃最旧的未编码块，同时记录被
+丢弃的 Sample 数。下一块送入编码器前必须带 `discontinuity`，使编码器、统计和后续接收端
+能够观察到媒体时间缺口，而不是把缺口两侧伪装成连续音频。
+
+短暂过载以保持实时性为先；连续丢弃超过配置阈值时由 `AudioCaptureWorker` 上报致命错误，
+防止会话在严重异常下长期输出破碎音频。
+
+### 8.4 EncodedAudioPacketQueue
+
+该队列保持编码输出顺序且容量固定。音频不采用视频参考帧的 pending AU 规则，也不能因为
+发送变慢而无限阻塞编码并积压 PCM。队列满时的精确丢弃策略取决于首版音频格式：设计必须
+在选定编码格式后明确可丢弃边界、RTP 时间戳缺口和 Decoder 恢复语义。
+
+无论选择哪种策略，队列过载都不能修改后续 `presentation_time` 来隐藏缺口；持续过载最终
+使会话失败。
+
+四个资源都不包含条件变量、`stop_token`、阻塞等待、`close()` 或 `closed` 状态。每个
 Worker 使用自己的条件变量统一响应资源 hint、控制命令、失败和线程退出，并在醒来后重新
 检查资源的真实状态。正常停流由 Controller 按序命令 Worker 排空，资源析构只发生在所有
 Worker 线程停止之后。
 
-## 9. 时间戳与帧率
+## 9. 共享时间轴、时间戳与帧率
 
-会话启动时记录：
+Controller 在任何媒体 Worker 启动前创建不可变的会话时间原点：
 
 ```text
 session_origin = steady_clock::now()
 ```
 
-调度帧时间转换为 90 kHz PTS：
+`SessionClock` 在会话运行期间不得改变原点。停止完成且所有 Worker 回到 Idle 后，下一次
+`start_publishing()` 才能建立新的原点；上一次会话的媒体对象必须已经排空或清理。
+
+领域对象使用相对于该原点的 `MediaTime`。`MediaTime` 表示媒体呈现位置，不绑定具体编码器
+或 RTP 时钟频率：
 
 ```text
-pts_90khz = round((captured_at - session_origin) * 90000)
+media_time = presentation_clock_time - session_origin
+video_pts_90khz = round(media_time * 90000)
+audio_pts = round(media_time * audio_clock_rate)
 ```
 
-首版规则：
+视频规则：
 
 - 默认以 30 fps 调度输出帧；
 - DXGI 在一个调度周期内没有新画面时，重复最近的有效画面；
 - 重复帧获得新的序号和 PTS；
 - 编码器 time base 使用 `1/90000`；
 - RTP 初始时间戳随机生成；
-- `rtp_timestamp = initial_timestamp + pts_90khz`，截断为无符号 32 位；
+- `rtp_timestamp = video_initial_timestamp + video_pts_90khz`，截断为无符号 32 位；
 - 一个 Access Unit 的所有 RTP 包共享同一时间戳；
 - 不使用系统墙上时间，不假设 RTP 时间戳永不回绕。
 
 尚未取得第一帧时，不生成空白帧；Worker 继续等待有效桌面画面或停止请求。
 
-## 10. 编码和 RTP 基线
+音频规则：
 
-首版目标参数：
+- 音频呈现时间优先根据 WASAPI 设备位置及其 QPC/单调时钟关联计算，而不是使用回调到达时间；
+- 一个 `CapturedAudioBlock` 的时间戳指向第一个 Sample；
+- 首次读取中早于 `session_origin` 的 Sample 被精确裁掉，不把负时间戳钳制为零；
+- 后续 Sample 时间由采样率和 Sample 位置推导，不能按每次读取的墙上时间重新起算；
+- 音频 RTP 初始时间戳独立随机生成，RTP 时钟频率由选定的音频格式规定；
+- WASAPI 不连续、主动丢弃和设备恢复都保留媒体时间缺口并设置 `discontinuity`；
+- 音频设备时钟与会话单调时钟可能长期漂移，首版音频实现前必须确定检测阈值和重采样校正边界。
+
+`captured_at` 继续保留为采集完成的单调时刻，只用于阶段延迟统计。它不是通用 PTS，不能
+用它覆盖设备提供的音频呈现位置。
+
+因为两条 RTP 轨道的初始时间戳独立随机，Receiver 不能仅凭 RTP Header 恢复二者的时间
+关系。首版必须在实现音频前，从 RTCP Sender Report 或会话描述携带轨道时间映射两种方案
+中选定一种。视频实现可以暂不发送该映射，但配置和传输设计不得假设永久只有一个时钟域。
+
+## 10. 编码、轨道和 RTP 基线
+
+### 10.1 视频参数
 
 | 参数 | 默认值 |
 |---|---:|
@@ -357,10 +511,29 @@ RTP 规则：
 - Marker 只设置在 Access Unit 最后一个 RTP 包；
 - 序列号和 SSRC 在会话开始时随机生成；
 - SPS/PPS 在 IDR 前以带内方式提供；
-- 第一版不实现 STAP-A、RTCP 和丢包恢复。
+- 首轮视频闭环不实现 STAP-A、RTCP 和丢包恢复。
 
 具体 FFmpeg H.264 编码器名称在实现前根据开发和 CI 环境确认；首版只选择一个软件编码
 后端，不同时维护多个编码器分支。
+
+### 10.2 音频参数
+
+首版音频格式必须同时满足 FFmpeg 开发/CI 环境可用、SemiPlayer 可解码、存在明确 RTP
+Payload 格式和适合低延迟四个条件。编码格式、采样率、声道数、编码帧长、码率、Payload
+Type 和 RTP 时钟频率列为音频实现前确认项，不在未验证环境前写死。
+
+### 10.3 双轨传输
+
+一个发布会话包含零或一条视频轨道以及零或一条音频轨道，至少启用一条。首版不支持同类
+多轨。每条轨道拥有独立的：
+
+- SSRC、Payload Type、RTP 序列号和随机初始时间戳；
+- 目标 UDP 端口和 `DatagramSink` 实例；
+- Packetizer、发送 Worker、队列和传输统计。
+
+视频和音频首版使用不同 UDP 端口，不在同一个 Socket 上复用。这保持 Worker 对 Socket
+的线程独占，并避免共享发送队列造成跨媒体背压。会话描述必须关联两条轨道，并提供 codec、
+endpoint、Payload Type、SSRC、clock rate 及共享时间映射所需信息。
 
 ## 11. 启动、停止和错误传播
 
@@ -369,6 +542,9 @@ RTP 规则：
 Main 调用 `PublisherComposition::assemble()` 创建 Notifier、资源、后端、Worker 和
 Controller。Worker 线程属于模块生命周期，可以在装配阶段启动并等待控制命令；装配失败
 时 Composition 逆序停止并释放已经创建的模块。
+
+Composition 根据配置装配已启用轨道。首轮视频实现只创建视频对象，不创建空的音频 Worker
+或 Backend；音频实现完成后，同一个 Composition 可以同时装配两条完整链路。
 
 装配成功后，Main 通过 Composition 获取有效期受限的 Controller 非拥有访问。Main 只调用：
 
@@ -379,14 +555,19 @@ PublisherController: start_publishing / stop_publishing / state / stats
 
 ### 11.2 开始发布
 
-`PublisherController::start_publishing()` 先清理上一次非正常会话残留，再按消费者到生产者
-的顺序配置并启动会话：
+`PublisherController::start_publishing()` 先清理上一次非正常会话残留，建立共享
+`SessionClock`，再按消费者到生产者的阶段顺序配置并启动所有已启用轨道：
 
 ```text
-RtpSenderWorker -> VideoEncoderWorker -> CaptureWorker
+1. VideoRtpSenderWorker / AudioRtpSenderWorker
+2. VideoEncoderWorker / AudioEncoderWorker
+3. VideoCaptureWorker / AudioCaptureWorker
 ```
 
-任一阶段启动失败时，Controller 按逆序停止已经启动的会话模块、清理资源并返回结构化
+同一阶段内先发出启动命令，再逐一等待确认，避免人为制造过大的轨道启动偏差。不要求两个
+采集后端在同一时刻产生首个媒体单元；它们依靠共享时间轴表达实际开始位置。
+
+任一阶段启动失败时，Controller 按逆序停止所有已经启动的轨道模块、清理资源并返回结构化
 错误；Worker 模块及其常驻线程仍由 Composition 持有。
 
 ### 11.3 正常停止
@@ -394,19 +575,22 @@ RtpSenderWorker -> VideoEncoderWorker -> CaptureWorker
 Ctrl+C 触发正常停止：
 
 ```text
-1. Controller 命令 CaptureWorker 停止当前采集会话并等待确认
-2. 确认不再产生新帧后，命令 VideoEncoderWorker 排空 Frame Store
-3. VideoEncoderWorker flush 编码器并回到 Idle
-4. 命令 RtpSenderWorker 排空 AU Queue，关闭当前文件和 socket
-5. RtpSenderWorker 回到 Idle，Controller 状态回到 Idle
-6. Controller 通过 Control 接口防御性 clear 两个空资源
+1. Controller 同时命令 VideoCaptureWorker 和 AudioCaptureWorker 停止生产
+2. 等待所有已启用的 Capture Worker 确认不再产生新媒体
+3. 命令两个 Encoder Worker 分别排空输入并 flush 编码器
+4. 等待两个 Encoder Worker 回到 Idle
+5. 命令两个 RTP Sender Worker 分别排空编码输出并关闭文件和 socket
+6. 等待两个 Sender Worker 回到 Idle
+7. Controller 通过 Control 接口防御性 clear 所有空资源并回到 Idle
 ```
 
-因为两个领域资源都有固定容量，正常停止时的剩余工作量有明确上界。
+同一阶段先向两条轨道发出命令，再等待确认；不先完整停止视频后再停止音频。因为所有领域
+资源都有固定容量，正常停止时的剩余工作量有明确上界。
 
 ### 11.4 致命错误
 
-Worker 只上报第一个致命错误。Controller 收到错误后向三个 Worker 发送立即停止命令；
+Worker 只上报第一个致命错误。首版任一已启用轨道失败均视为发布会话失败。Controller 收到
+错误后向所有已启用 Worker 发送立即停止命令；
 Worker 自己的条件变量由控制命令直接唤醒，不依赖资源通知。致命错误路径不保证排空媒体
 数据，Controller 通过 Control 接口清理残留数据，优先保证及时、确定地回到 Failed 状态。
 
@@ -414,7 +598,7 @@ Worker 自己的条件变量由控制命令直接唤醒，不依赖资源通知�
 
 - 领域错误类别；
 - 失败操作；
-- DXGI、FFmpeg 或 Winsock 原生错误码；
+- DXGI、WASAPI、FFmpeg 或 Winsock 原生错误码；
 - 可读错误信息。
 
 异常不得越过线程入口；Worker 顶层捕获异常并转换为内部失败。
@@ -422,7 +606,7 @@ Worker 自己的条件变量由控制命令直接唤醒，不依赖资源通知�
 ### 11.5 进程释放
 
 Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话仍在运行，Composition
-先要求 Controller 停止会话，再停止 Controller 控制线程和三个 Worker 常驻线程，最后按
+先要求 Controller 停止会话，再停止 Controller 控制线程和所有已装配 Worker 常驻线程，最后按
 依赖逆序释放 Worker、Backend、资源、Stats 和 Notifier。
 
 资源析构时必须已经没有线程访问它们。`dispose()` 幂等；Composition 析构函数将其作为
@@ -430,8 +614,9 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 
 ## 12. 可观测性
 
-`PublisherStats` 不创建线程。三个 Worker 更新原子计数和耗时累计，Main 每秒读取一致的
-统计快照。
+`PublisherStats` 不创建线程。所有 Worker 更新原子计数和耗时累计，Main 每秒读取一致的
+统计快照。快照按 `session`、`video` 和 `audio` 分组；未启用轨道明确标记为 disabled，
+不以全零数据冒充已运行轨道。
 
 首版至少记录：
 
@@ -444,8 +629,18 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 - 编码平均、最大耗时；
 - H.264 输出字节数和估算码率；
 - RTP 包数、发送字节数和 UDP 错误数；
-- 两个领域资源的当前水位和峰值水位；
+- 两个视频领域资源的当前水位和峰值水位；
 - 采集到编码完成、采集到发送完成的平均和最大延迟。
+
+音频实现后至少增加：
+
+- WASAPI 捕获块数、Sample 数、静音块和设备不连续次数；
+- 主动丢弃的 PCM 块数、Sample 数及连续丢弃时长；
+- 音频编码输入、输出、失败、平均和最大耗时；
+- 编码音频字节数、估算码率、RTP 包数和 UDP 错误数；
+- 两个音频资源的当前水位、峰值水位和缓存时长；
+- 音频采集到编码完成、采集到发送完成的平均和最大延迟；
+- 音频设备时间相对共享会话时间的偏差和漂移估计。
 
 日志不承载高频指标；逐帧、逐包日志默认关闭。
 
@@ -456,10 +651,13 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 
 ### 13.1 领域单元测试
 
-- `CapturedFrameStore` 容量、替换、clear 和 `NotEmpty` 边界通知；
-- `EncodedAccessUnitQueue` 顺序、满、pending AU、clear 和边界通知；
+- `CapturedVideoFrameStore` 容量、替换、clear 和 `NotEmpty` 边界通知；
+- `EncodedVideoAccessUnitQueue` 顺序、满、pending AU、clear 和边界通知；
+- 两个音频队列的容量、不连续传播、过载阈值和 clear 边界通知；
 - Notifier 的类型隔离、订阅生命周期和并发分发；
 - FrameScheduler 帧率和 PTS 单调性；
+- SessionClock 的共同原点、视频 90 kHz 和音频时钟频率换算；
+- 音频 Sample 位置、块持续时间和时间戳连续性；
 - Annex-B NAL 拆分；
 - RTP Header、序列号、时间戳和 Marker；
 - FU-A 边界、重组一致性和 MTU 上界；
@@ -471,11 +669,24 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 SyntheticDesktopCaptureBackend
 -> VideoEncoderWorker
 -> FakeVideoEncoderBackend 或 FFmpeg Backend
--> RtpSenderWorker
+-> VideoRtpSenderWorker
 -> MemoryDatagramSink
 ```
 
 普通 Windows/Linux CI 不依赖真实桌面、显卡或网络。
+
+音频实现后增加无设备链路：
+
+```text
+SyntheticSystemAudioCaptureBackend
+-> AudioEncoderWorker
+-> FakeAudioEncoderBackend 或 FFmpeg Backend
+-> AudioRtpSenderWorker
+-> MemoryDatagramSink
+```
+
+联合测试必须覆盖音视频首个媒体单元到达时间不同、任一轨道启动失败、任一轨道运行期失败、
+同时停止和共享时间映射。
 
 ### 13.3 外部交叉验证
 
@@ -484,6 +695,8 @@ SyntheticDesktopCaptureBackend
 - 使用 `ffplay` 播放输出；
 - 使用 SemiStreamProbe 检查 RTP/NAL/FU-A；
 - 视频闭环完成后执行 1080p30、30 分钟稳定性测试。
+- 音频实现后使用标准工具验证编码输出、采样率、声道和连续时间戳；
+- 音视频闭环完成后执行 30 分钟同步与漂移测试。
 
 DXGI 真实桌面测试属于 Windows 专用集成测试，不作为无桌面 CI 的硬性条件。
 
@@ -501,21 +714,33 @@ src/publisher/
 
   contracts/
     capture/desktop_capture_backend.*
+    capture/system_audio_capture_backend.*
     processing/video_frame_processor.*
+    processing/audio_frame_processor.*
     encoder/video_encoder_backend.*
+    encoder/audio_encoder_backend.*
     transport/datagram_sink.*
 
   domain/
-    media/captured_frame.*
-    media/encoded_access_unit.*
-    resource/captured_frame_store/...
-    resource/encoded_access_unit_queue/...
-    worker/capture/...
+    media/captured_video_frame.*
+    media/encoded_video_access_unit.*
+    media/captured_audio_block.*
+    media/encoded_audio_packet.*
+    resource/captured_video_frame_store/...
+    resource/encoded_video_access_unit_queue/...
+    resource/captured_audio_block_queue/...
+    resource/encoded_audio_packet_queue/...
+    worker/video_capture/...
     worker/video_encoder/...
-    worker/rtp_sender/...
+    worker/video_rtp_sender/...
+    worker/audio_capture/...
+    worker/audio_encoder/...
+    worker/audio_rtp_sender/...
     rtp/h264_nal_splitter.*
     rtp/h264_rtp_packetizer.*
+    rtp/audio_rtp_packetizer.*
     timing/frame_scheduler.*
+    timing/session_clock.*
     stats/publisher_stats.*
 
   infrastructure/
@@ -523,8 +748,12 @@ src/publisher/
     notifier/default_notifier.*
     capture/dxgi_desktop_capture_backend.*
     capture/synthetic_desktop_capture_backend.*
+    capture/wasapi_loopback_capture_backend.*
+    capture/synthetic_system_audio_capture_backend.*
     ffmpeg/sws_video_frame_processor.*
     ffmpeg/ffmpeg_h264_encoder_backend.*
+    ffmpeg/swr_audio_frame_processor.*
+    ffmpeg/ffmpeg_audio_encoder_backend.*
     transport/udp_datagram_sink.*
     transport/memory_datagram_sink.*
     output/h264_file_writer.*
@@ -547,8 +776,13 @@ CMake 的部署目标对应三个最终程序。Publisher 额外提供一个不�
 
 ### 已决定
 
-- 首阶段只做视频，不做音频；
-- 三个领域 Worker 各自拥有一个线程；
+- 设计覆盖音视频，实施先完成视频闭环，再实现音频和音画同步；
+- 不为尚未实现的音频创建占位代码或通用媒体 Graph；
+- 视频和音频各由 Capture、Encoder、RTP Sender 三个 Worker 组成，每个 Worker 独占线程；
+- 两条轨道共享单调会话时间轴，领域媒体时间不绑定 RTP 时钟频率；
+- 两条轨道拥有独立 SSRC、Payload Type、RTP 状态、UDP 端口、Socket、队列和统计；
+- 首版不支持同类多轨，至少启用一条轨道；
+- 任一已启用轨道发生致命错误时，整个发布会话失败；
 - BGRA CPU 帧跨采集和编码线程传递；
 - 像素处理与编码由同一个 Worker 线程执行；
 - 采集帧资源容量 2，满时替换最旧帧；
@@ -558,7 +792,8 @@ CMake 的部署目标对应三个最终程序。Publisher 额外提供一个不�
 - Composition 持有进程级对象图，Controller 只编排存活期间的发布会话；
 - H.264、Annex-B、90 kHz 时间基、RTP/UDP、Single NAL 和 FU-A；
 - 支持可选 `.h264` 文件输出；
-- 使用 Synthetic、Fake 和 Memory 后端保证可测试性。
+- 音频采集不得被下游长期阻塞，所有音频积压有界且必须保留不连续语义；
+- 使用 Synthetic、Fake 和 Memory 后端保证两条链路可测试性。
 
 ### 实现前确认
 
@@ -566,11 +801,17 @@ CMake 的部署目标对应三个最终程序。Publisher 额外提供一个不�
 - 目标屏幕不是 16:9 时采用裁剪、拉伸还是等比缩放加填充；
 - DXGI 首版是否合成鼠标指针；
 - `.h264` 文件输出与 RTP 是否允许同时开启。
+- 首版音频编码格式及 FFmpeg、SemiPlayer、RTP Payload 兼容性；
+- 音频采样率、声道数、编码帧长、码率、Payload Type 和 RTP 时钟频率；
+- WASAPI 设备位置到共享会话时间的精确映射；
+- 音频设备漂移的检测阈值和重采样校正边界；
+- 编码音频队列满时的格式相关丢弃与恢复策略；
+- 音视频 RTP 时间关系通过 RTCP Sender Report 还是会话描述传递；
+- 双轨会话描述的具体格式和交换方式。
 
 ### 后续阶段再决定
 
-- WASAPI、音频编码格式和音视频统一时间线；
 - 硬件编码和 GPU 零拷贝；
 - 运行时采集设备及编码参数切换；
-- RTCP、反馈、重传和拥塞控制；
+- 除音画时钟映射可能需要的 Sender Report 外，其他 RTCP、反馈、重传和拥塞控制；
 - Relay 会话协议和多接收端管理。

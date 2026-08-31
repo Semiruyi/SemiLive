@@ -14,8 +14,8 @@ SemiLive 是一个正在开发的 C++23 实时音视频项目，目标是完成�
 - `semilive_relay`：Linux 转发端占位程序；
 - `semilive_receiver`：接收端占位程序。
 
-Publisher 首个视频阶段的模块边界、线程模型和运行语义已经确定，详见
-[Publisher 首版设计](docs/publisher-design.md)。Receiver 和 Relay 仍将在进入对应
+Publisher 首版音视频模块边界、线程模型、共享时间轴和运行语义已经确定，实施仍先完成
+视频闭环，详见 [Publisher 音视频设计](docs/publisher-design.md)。Receiver 和 Relay 仍将在进入对应
 里程碑前单独设计。
 
 ## 项目目标
@@ -40,15 +40,21 @@ Publisher 首个视频阶段的模块边界、线程模型和运行语义已经�
 
 ## 设计与路线图
 
-- [Publisher 首版设计](docs/publisher-design.md)：视频发布端的模块、线程、依赖与测试边界；
+- [Publisher 音视频设计](docs/publisher-design.md)：发布端双轨模块、线程、时间轴、依赖与测试边界；
 - [项目路线图](docs/roadmap.md)：项目阶段、交付物和完成条件。
 
 ## 构建
 
-Windows 开发环境使用 MSYS2 UCRT64、CMake、Ninja 和 spdlog
-（MSYS2 包 `mingw-w64-ucrt-x86_64-spdlog`）：
+Windows 开发环境使用 MSYS2 UCRT64。打开 **MSYS2 UCRT64** 终端，用一条命令完成
+系统更新并安装编译器、CMake、Ninja 和 spdlog：
 
-```powershell
+```sh
+pacman -Syu --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-spdlog
+```
+
+仍在 MSYS2 UCRT64 终端中配置、构建并测试：
+
+```sh
 cmake --preset windows-debug
 cmake --build --preset windows-debug
 ctest --preset windows-debug
@@ -66,10 +72,10 @@ ctest --preset linux-debug
 
 运行占位程序：
 
-```powershell
-.\build\windows-debug\bin\semilive_publisher.exe --help
-.\build\windows-debug\bin\semilive_relay.exe --help
-.\build\windows-debug\bin\semilive_receiver.exe --help
+```sh
+./build/windows-debug/bin/semilive_publisher.exe --help
+./build/windows-debug/bin/semilive_relay.exe --help
+./build/windows-debug/bin/semilive_receiver.exe --help
 ```
 
 ## 许可证
