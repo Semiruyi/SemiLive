@@ -86,7 +86,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 领域资源 | `CapturedAudioBlockQueue` | 容量受限的 PCM 块队列，过载时保持实时性并标记间断 |
 | 领域资源 | `EncodedAudioPacketQueue` | 容量受限的编码音频包队列 |
 | 领域服务 | `FrameScheduler` | 固定帧率调度及采集时间戳生成 |
-| 领域服务 | `SessionClock` | 提供音视频共享的单调会话原点和媒体时间换算 |
+| 领域服务 | `SessionTimeline` | 保存音视频共享的不可变单调会话原点并换算媒体时间 |
 | 领域服务 | `H264NalSplitter` | 拆分 Annex-B Access Unit 中的 NAL |
 | 领域服务 | `H264RtpPacketizer` | RFC 6184 Single NAL/FU-A 封包 |
 | 领域服务 | `AudioRtpPacketizer` | 按选定音频格式生成 RTP Payload |
@@ -131,7 +131,7 @@ flowchart TB
 
     Composition -->|创建并持有| Notifier[DefaultNotifier]
     Composition -->|创建| Stats[PublisherStats]
-    Composition -->|创建| Clock[SessionClock]
+    Composition -->|创建| Clock[SessionTimeline]
 
     subgraph Video[Video Pipeline]
         VideoFrameStore[CapturedVideoFrameStore]
@@ -242,7 +242,7 @@ flowchart LR
     AudioPacketQueue --> AudioSender[AudioRtpSenderWorker]
     AudioSender --> AudioUdp[Audio UDP Datagram Sink]
 
-    Clock[Shared SessionClock] -. media time .-> VideoCapture
+    Clock[Shared SessionTimeline] -. media time .-> VideoCapture
     Clock -. media time .-> AudioCapture
 ```
 
@@ -292,6 +292,7 @@ struct CapturedVideoFrame {
     std::uint32_t height = 0;
     std::uint32_t stride = 0;
     std::uint64_t sequence = 0;
+    MediaTime presentation_time;
     std::chrono::steady_clock::time_point captured_at;
 };
 ```
@@ -301,7 +302,8 @@ struct CapturedVideoFrame {
 - `bgra` 由该对象独占，跨线程后不再被采集后端修改；
 - `stride` 首版为紧凑行宽，仍保留字段避免接口依赖隐含假设；
 - `sequence` 按调度输出帧递增，重复桌面画面也产生新序号；
-- `captured_at` 来自单调时钟，不使用系统墙上时间。
+- `presentation_time` 由调度时刻相对会话原点换算，跨编码和发送边界保持不变；
+- `captured_at` 来自单调时钟，只用于计算采集后的处理延迟，不使用系统墙上时间。
 
 ### 7.2 EncodedVideoAccessUnit
 
@@ -444,7 +446,7 @@ Controller 在任何媒体 Worker 启动前创建不可变的会话时间原点�
 session_origin = steady_clock::now()
 ```
 
-`SessionClock` 在会话运行期间不得改变原点。停止完成且所有 Worker 回到 Idle 后，下一次
+`SessionTimeline` 在会话运行期间不得改变原点。停止完成且所有 Worker 回到 Idle 后，下一次
 `start_publishing()` 才能建立新的原点；上一次会话的媒体对象必须已经排空或清理。
 
 领域对象使用相对于该原点的 `MediaTime`。`MediaTime` 表示媒体呈现位置，不绑定具体编码器
@@ -452,9 +454,14 @@ session_origin = steady_clock::now()
 
 ```text
 media_time = presentation_clock_time - session_origin
-video_pts_90khz = round(media_time * 90000)
-audio_pts = round(media_time * audio_clock_rate)
+video_clock_ticks = round(media_time * 90000)
+audio_clock_ticks = round(media_time * audio_clock_rate)
 ```
+
+实现使用 `MediaTime = std::chrono::nanoseconds`。`media_time_to_clock_ticks()` 只接受正的时钟
+频率和非负的已发布媒体时间，使用整数运算按最近 tick 舍入，并在宽位结果溢出时失败；不得
+使用浮点换算。`media_time_to_rtp_timestamp()` 将宽位 tick 偏移与随机初始时间戳相加，最终
+按无符号 32 位自然回绕。
 
 视频规则：
 
@@ -463,7 +470,7 @@ audio_pts = round(media_time * audio_clock_rate)
 - 重复帧获得新的序号和 PTS；
 - 编码器 time base 使用 `1/90000`；
 - RTP 初始时间戳随机生成；
-- `rtp_timestamp = video_initial_timestamp + video_pts_90khz`，截断为无符号 32 位；
+- `rtp_timestamp = video_initial_timestamp + video_clock_ticks`，按无符号 32 位自然回绕；
 - 一个 Access Unit 的所有 RTP 包共享同一时间戳；
 - 不使用系统墙上时间，不假设 RTP 时间戳永不回绕。
 
@@ -556,7 +563,7 @@ PublisherController: start_publishing / stop_publishing / state / stats
 ### 11.2 开始发布
 
 `PublisherController::start_publishing()` 先清理上一次非正常会话残留，建立共享
-`SessionClock`，再按消费者到生产者的阶段顺序配置并启动所有已启用轨道：
+`SessionTimeline`，再按消费者到生产者的阶段顺序配置并启动所有已启用轨道：
 
 ```text
 1. VideoRtpSenderWorker / AudioRtpSenderWorker
@@ -656,7 +663,7 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 - 两个音频队列的容量、不连续传播、过载阈值和 clear 边界通知；
 - Notifier 的类型隔离、订阅生命周期和并发分发；
 - FrameScheduler 帧率和 PTS 单调性；
-- SessionClock 的共同原点、视频 90 kHz 和音频时钟频率换算；
+- SessionTimeline 的共同原点、整数舍入、视频 90 kHz、音频时钟频率和 RTP 回绕换算；
 - 音频 Sample 位置、块持续时间和时间戳连续性；
 - Annex-B NAL 拆分；
 - RTP Header、序列号、时间戳和 Marker；
@@ -740,7 +747,8 @@ src/publisher/
     rtp/h264_rtp_packetizer.*
     rtp/audio_rtp_packetizer.*
     timing/frame_scheduler.*
-    timing/session_clock.*
+    timing/media_time.*
+    timing/session_timeline.*
     stats/publisher_stats.*
 
   infrastructure/

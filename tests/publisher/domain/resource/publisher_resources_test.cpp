@@ -43,6 +43,8 @@ CapturedVideoFrame frame(const std::uint64_t sequence) {
     result.height = 1;
     result.stride = 4;
     result.sequence = sequence;
+    result.presentation_time =
+        std::chrono::milliseconds{static_cast<std::int64_t>(sequence) * 10};
     result.captured_at = std::chrono::steady_clock::now();
     return result;
 }
@@ -50,7 +52,8 @@ CapturedVideoFrame frame(const std::uint64_t sequence) {
 EncodedVideoAccessUnit access_unit(const std::uint64_t sequence) {
     EncodedVideoAccessUnit result;
     result.annex_b.resize(8, std::byte{0x01});
-    result.pts_90khz = static_cast<std::int64_t>(sequence * 3'000);
+    result.presentation_time =
+        std::chrono::milliseconds{static_cast<std::int64_t>(sequence) * 10};
     result.source_sequence = sequence;
     result.captured_at = std::chrono::steady_clock::now();
     return result;
@@ -74,6 +77,8 @@ void captured_video_frame_store_replaces_oldest() {
     const auto popped_third = store.try_pop();
     require(popped_second && popped_second->sequence == 2,
             "replacement must discard sequence 1");
+    require(popped_second && popped_second->presentation_time == std::chrono::milliseconds{20},
+            "frame store must preserve presentation time");
     require(popped_third && popped_third->sequence == 3,
             "newest frame must remain available");
     require(store.empty(), "store must be empty after both frames are consumed");
@@ -140,6 +145,8 @@ void encoded_video_access_unit_queue_preserves_pending_item_and_notifies_edges()
     const auto popped_first = queue.try_pop();
     require(popped_first && popped_first->source_sequence == 1,
             "AU queue must preserve FIFO order");
+    require(popped_first && popped_first->presentation_time == std::chrono::milliseconds{10},
+            "AU queue must preserve presentation time");
     require(not_full_count == 1, "full-to-non-full transition must notify the producer");
     require(queue.try_push(std::move(pending)) == EncodedVideoAccessUnitPushResult::Accepted,
             "pending AU must be accepted after space becomes available");
