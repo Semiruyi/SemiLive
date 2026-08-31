@@ -2,7 +2,6 @@
 
 namespace semilive::publisher::domain {
 
-struct EncodedAccessUnitQueueNotEmpty {};
-struct EncodedAccessUnitQueueNotFull {};
+struct CapturedVideoFrameStoreNotEmpty {};
 
 }  // namespace semilive::publisher::domain

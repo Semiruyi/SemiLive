@@ -7,12 +7,11 @@
 
 namespace semilive::publisher::domain {
 
-struct CapturedFrame {
-    std::vector<std::byte> bgra;
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
-    std::uint32_t stride = 0;
-    std::uint64_t sequence = 0;
+struct EncodedVideoAccessUnit {
+    std::vector<std::byte> annex_b;
+    std::int64_t pts_90khz = 0;
+    bool key_frame = false;
+    std::uint64_t source_sequence = 0;
     std::chrono::steady_clock::time_point captured_at{};
 };
 

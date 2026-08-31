@@ -1,8 +1,8 @@
 #pragma once
 
-#include "publisher/domain/resource/encoded_access_unit_queue/encoded_access_unit_queue_control.hpp"
-#include "publisher/domain/resource/encoded_access_unit_queue/encoded_access_unit_sink.hpp"
-#include "publisher/domain/resource/encoded_access_unit_queue/encoded_access_unit_source.hpp"
+#include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue_control.hpp"
+#include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_sink.hpp"
+#include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_source.hpp"
 #include "publisher/infrastructure/notifier/notifier.hpp"
 
 #include <cstddef>
@@ -12,19 +12,19 @@
 
 namespace semilive::publisher::domain {
 
-class EncodedAccessUnitQueue final : public EncodedAccessUnitSink,
-                                     public EncodedAccessUnitSource,
-                                     public EncodedAccessUnitQueueControl {
+class EncodedVideoAccessUnitQueue final : public EncodedVideoAccessUnitSink,
+                                     public EncodedVideoAccessUnitSource,
+                                     public EncodedVideoAccessUnitQueueControl {
 public:
     static constexpr std::size_t kDefaultCapacity = 4;
 
-    explicit EncodedAccessUnitQueue(std::shared_ptr<infra::Notifier> notifier,
+    explicit EncodedVideoAccessUnitQueue(std::shared_ptr<infra::Notifier> notifier,
                                     std::size_t capacity = kDefaultCapacity);
-    ~EncodedAccessUnitQueue() override = default;
+    ~EncodedVideoAccessUnitQueue() override = default;
 
-    [[nodiscard]] EncodedAccessUnitPushResult try_push(EncodedAccessUnit&& access_unit) override;
+    [[nodiscard]] EncodedVideoAccessUnitPushResult try_push(EncodedVideoAccessUnit&& access_unit) override;
     [[nodiscard]] bool full() const noexcept override;
-    [[nodiscard]] std::optional<EncodedAccessUnit> try_pop() override;
+    [[nodiscard]] std::optional<EncodedVideoAccessUnit> try_pop() override;
     [[nodiscard]] bool empty() const noexcept override;
     [[nodiscard]] std::size_t clear() noexcept override;
     [[nodiscard]] std::size_t size() const noexcept override;
@@ -38,7 +38,7 @@ private:
     std::shared_ptr<infra::Notifier> notifier_;
     const std::size_t capacity_;
     mutable std::mutex mutex_;
-    std::deque<EncodedAccessUnit> access_units_;
+    std::deque<EncodedVideoAccessUnit> access_units_;
     std::size_t peak_size_ = 0;
 };
 

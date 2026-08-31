@@ -1,7 +1,7 @@
-#include "publisher/domain/resource/captured_frame_store/captured_frame_store.hpp"
-#include "publisher/domain/resource/captured_frame_store/captured_frame_store_events.hpp"
-#include "publisher/domain/resource/encoded_access_unit_queue/encoded_access_unit_queue.hpp"
-#include "publisher/domain/resource/encoded_access_unit_queue/encoded_access_unit_queue_events.hpp"
+#include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_store.hpp"
+#include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_store_events.hpp"
+#include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue.hpp"
+#include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue_events.hpp"
 #include "publisher/infrastructure/notifier/default_notifier.hpp"
 
 #include <atomic>
@@ -19,15 +19,15 @@
 
 namespace {
 
-using semilive::publisher::domain::CapturedFrame;
-using semilive::publisher::domain::CapturedFramePushResult;
-using semilive::publisher::domain::CapturedFrameStore;
-using semilive::publisher::domain::CapturedFrameStoreNotEmpty;
-using semilive::publisher::domain::EncodedAccessUnit;
-using semilive::publisher::domain::EncodedAccessUnitPushResult;
-using semilive::publisher::domain::EncodedAccessUnitQueue;
-using semilive::publisher::domain::EncodedAccessUnitQueueNotEmpty;
-using semilive::publisher::domain::EncodedAccessUnitQueueNotFull;
+using semilive::publisher::domain::CapturedVideoFrame;
+using semilive::publisher::domain::CapturedVideoFramePushResult;
+using semilive::publisher::domain::CapturedVideoFrameStore;
+using semilive::publisher::domain::CapturedVideoFrameStoreNotEmpty;
+using semilive::publisher::domain::EncodedVideoAccessUnit;
+using semilive::publisher::domain::EncodedVideoAccessUnitPushResult;
+using semilive::publisher::domain::EncodedVideoAccessUnitQueue;
+using semilive::publisher::domain::EncodedVideoAccessUnitQueueNotEmpty;
+using semilive::publisher::domain::EncodedVideoAccessUnitQueueNotFull;
 using semilive::publisher::infra::DefaultNotifier;
 
 void require(const bool condition, const std::string_view message) {
@@ -36,8 +36,8 @@ void require(const bool condition, const std::string_view message) {
     }
 }
 
-CapturedFrame frame(const std::uint64_t sequence) {
-    CapturedFrame result;
+CapturedVideoFrame frame(const std::uint64_t sequence) {
+    CapturedVideoFrame result;
     result.bgra.resize(4);
     result.width = 1;
     result.height = 1;
@@ -47,8 +47,8 @@ CapturedFrame frame(const std::uint64_t sequence) {
     return result;
 }
 
-EncodedAccessUnit access_unit(const std::uint64_t sequence) {
-    EncodedAccessUnit result;
+EncodedVideoAccessUnit access_unit(const std::uint64_t sequence) {
+    EncodedVideoAccessUnit result;
     result.annex_b.resize(8, std::byte{0x01});
     result.pts_90khz = static_cast<std::int64_t>(sequence * 3'000);
     result.source_sequence = sequence;
@@ -56,18 +56,18 @@ EncodedAccessUnit access_unit(const std::uint64_t sequence) {
     return result;
 }
 
-void captured_frame_store_replaces_oldest() {
+void captured_video_frame_store_replaces_oldest() {
     auto notifier = std::make_shared<DefaultNotifier>();
-    CapturedFrameStore store{notifier, 2};
+    CapturedVideoFrameStore store{notifier, 2};
     auto first = frame(1);
     auto second = frame(2);
     auto third = frame(3);
 
-    require(store.try_push(std::move(first)) == CapturedFramePushResult::Accepted,
+    require(store.try_push(std::move(first)) == CapturedVideoFramePushResult::Accepted,
             "first frame must be accepted");
-    require(store.try_push(std::move(second)) == CapturedFramePushResult::Accepted,
+    require(store.try_push(std::move(second)) == CapturedVideoFramePushResult::Accepted,
             "second frame must be accepted");
-    require(store.try_push(std::move(third)) == CapturedFramePushResult::ReplacedOldest,
+    require(store.try_push(std::move(third)) == CapturedVideoFramePushResult::ReplacedOldest,
             "third frame must replace the oldest frame");
 
     const auto popped_second = store.try_pop();
@@ -81,20 +81,20 @@ void captured_frame_store_replaces_oldest() {
     require(store.replaced_count() == 1, "frame replacement must be counted");
 }
 
-void captured_frame_store_notifies_empty_to_non_empty_and_clears() {
+void captured_video_frame_store_notifies_empty_to_non_empty_and_clears() {
     auto notifier = std::make_shared<DefaultNotifier>();
-    CapturedFrameStore store{notifier, 2};
+    CapturedVideoFrameStore store{notifier, 2};
     int not_empty_count = 0;
-    auto subscription = notifier->subscribe<CapturedFrameStoreNotEmpty>(
-        [&not_empty_count](const CapturedFrameStoreNotEmpty&) {
+    auto subscription = notifier->subscribe<CapturedVideoFrameStoreNotEmpty>(
+        [&not_empty_count](const CapturedVideoFrameStoreNotEmpty&) {
             ++not_empty_count;
         });
 
     auto first = frame(1);
     auto second = frame(2);
-    require(store.try_push(std::move(first)) == CapturedFramePushResult::Accepted,
+    require(store.try_push(std::move(first)) == CapturedVideoFramePushResult::Accepted,
             "first frame must be accepted");
-    require(store.try_push(std::move(second)) == CapturedFramePushResult::Accepted,
+    require(store.try_push(std::move(second)) == CapturedVideoFramePushResult::Accepted,
             "second frame must be accepted");
     require(not_empty_count == 1, "non-empty notification must be edge-triggered");
 
@@ -102,37 +102,37 @@ void captured_frame_store_notifies_empty_to_non_empty_and_clears() {
     require(store.empty(), "clear must empty the frame store");
 
     auto third = frame(3);
-    require(store.try_push(std::move(third)) == CapturedFramePushResult::Accepted,
+    require(store.try_push(std::move(third)) == CapturedVideoFramePushResult::Accepted,
             "frame after clear must be accepted");
     require(not_empty_count == 2, "push after clear must publish a new edge");
     require(subscription->active(), "resource notification subscription must remain active");
 }
 
-void encoded_access_unit_queue_preserves_pending_item_and_notifies_edges() {
+void encoded_video_access_unit_queue_preserves_pending_item_and_notifies_edges() {
     auto notifier = std::make_shared<DefaultNotifier>();
-    EncodedAccessUnitQueue queue{notifier, 2};
+    EncodedVideoAccessUnitQueue queue{notifier, 2};
     int not_empty_count = 0;
     int not_full_count = 0;
-    auto not_empty_subscription = notifier->subscribe<EncodedAccessUnitQueueNotEmpty>(
-        [&not_empty_count](const EncodedAccessUnitQueueNotEmpty&) {
+    auto not_empty_subscription = notifier->subscribe<EncodedVideoAccessUnitQueueNotEmpty>(
+        [&not_empty_count](const EncodedVideoAccessUnitQueueNotEmpty&) {
             ++not_empty_count;
         });
-    auto not_full_subscription = notifier->subscribe<EncodedAccessUnitQueueNotFull>(
-        [&not_full_count](const EncodedAccessUnitQueueNotFull&) {
+    auto not_full_subscription = notifier->subscribe<EncodedVideoAccessUnitQueueNotFull>(
+        [&not_full_count](const EncodedVideoAccessUnitQueueNotFull&) {
             ++not_full_count;
         });
 
     auto first = access_unit(1);
     auto second = access_unit(2);
     auto pending = access_unit(3);
-    require(queue.try_push(std::move(first)) == EncodedAccessUnitPushResult::Accepted,
+    require(queue.try_push(std::move(first)) == EncodedVideoAccessUnitPushResult::Accepted,
             "first AU must be accepted");
-    require(queue.try_push(std::move(second)) == EncodedAccessUnitPushResult::Accepted,
+    require(queue.try_push(std::move(second)) == EncodedVideoAccessUnitPushResult::Accepted,
             "second AU must be accepted");
     require(not_empty_count == 1, "AU not-empty notification must be edge-triggered");
     require(queue.full(), "two AUs must fill a capacity-two queue");
 
-    require(queue.try_push(std::move(pending)) == EncodedAccessUnitPushResult::Full,
+    require(queue.try_push(std::move(pending)) == EncodedVideoAccessUnitPushResult::Full,
             "full AU queue must reject the pending AU");
     require(pending.source_sequence == 3 && !pending.annex_b.empty(),
             "full result must not consume the pending AU");
@@ -141,7 +141,7 @@ void encoded_access_unit_queue_preserves_pending_item_and_notifies_edges() {
     require(popped_first && popped_first->source_sequence == 1,
             "AU queue must preserve FIFO order");
     require(not_full_count == 1, "full-to-non-full transition must notify the producer");
-    require(queue.try_push(std::move(pending)) == EncodedAccessUnitPushResult::Accepted,
+    require(queue.try_push(std::move(pending)) == EncodedVideoAccessUnitPushResult::Accepted,
             "pending AU must be accepted after space becomes available");
 
     const auto popped_second = queue.try_pop();
@@ -157,20 +157,20 @@ void encoded_access_unit_queue_preserves_pending_item_and_notifies_edges() {
             "AU subscriptions must remain active");
 }
 
-void encoded_access_unit_queue_clear_reports_discard_and_releases_full_edge() {
+void encoded_video_access_unit_queue_clear_reports_discard_and_releases_full_edge() {
     auto notifier = std::make_shared<DefaultNotifier>();
-    EncodedAccessUnitQueue queue{notifier, 2};
+    EncodedVideoAccessUnitQueue queue{notifier, 2};
     int not_full_count = 0;
-    auto subscription = notifier->subscribe<EncodedAccessUnitQueueNotFull>(
-        [&not_full_count](const EncodedAccessUnitQueueNotFull&) {
+    auto subscription = notifier->subscribe<EncodedVideoAccessUnitQueueNotFull>(
+        [&not_full_count](const EncodedVideoAccessUnitQueueNotFull&) {
             ++not_full_count;
         });
 
     auto first = access_unit(1);
     auto second = access_unit(2);
-    require(queue.try_push(std::move(first)) == EncodedAccessUnitPushResult::Accepted,
+    require(queue.try_push(std::move(first)) == EncodedVideoAccessUnitPushResult::Accepted,
             "first AU must be accepted");
-    require(queue.try_push(std::move(second)) == EncodedAccessUnitPushResult::Accepted,
+    require(queue.try_push(std::move(second)) == EncodedVideoAccessUnitPushResult::Accepted,
             "second AU must be accepted");
 
     require(queue.clear() == 2, "clear must report both discarded AUs");
@@ -182,17 +182,17 @@ void encoded_access_unit_queue_clear_reports_discard_and_releases_full_edge() {
 void notifier_subscription_lifetime_controls_delivery() {
     DefaultNotifier notifier;
     int calls = 0;
-    auto subscription = notifier.subscribe<CapturedFrameStoreNotEmpty>(
-        [&calls](const CapturedFrameStoreNotEmpty&) {
+    auto subscription = notifier.subscribe<CapturedVideoFrameStoreNotEmpty>(
+        [&calls](const CapturedVideoFrameStoreNotEmpty&) {
             ++calls;
         });
 
-    require(notifier.send(CapturedFrameStoreNotEmpty{}),
+    require(notifier.send(CapturedVideoFrameStoreNotEmpty{}),
             "event with an active subscriber must be dispatched");
     require(calls == 1, "subscriber must receive the matching event");
     require(subscription->unsubscribe(), "first unsubscribe must succeed");
     require(!subscription->unsubscribe(), "unsubscribe must be idempotent");
-    require(!notifier.send(CapturedFrameStoreNotEmpty{}),
+    require(!notifier.send(CapturedVideoFrameStoreNotEmpty{}),
             "event without subscribers must not be dispatched");
     require(calls == 1, "unsubscribed callback must not run again");
 }
@@ -201,28 +201,28 @@ void notifier_callback_failure_does_not_stop_delivery() {
     DefaultNotifier notifier;
     int calls = 0;
 
-    auto throwing_subscription = notifier.subscribe<CapturedFrameStoreNotEmpty>(
-        [](const CapturedFrameStoreNotEmpty&) { throw std::runtime_error{"expected failure"}; });
-    auto healthy_subscription = notifier.subscribe<CapturedFrameStoreNotEmpty>(
-        [&calls](const CapturedFrameStoreNotEmpty&) { ++calls; });
+    auto throwing_subscription = notifier.subscribe<CapturedVideoFrameStoreNotEmpty>(
+        [](const CapturedVideoFrameStoreNotEmpty&) { throw std::runtime_error{"expected failure"}; });
+    auto healthy_subscription = notifier.subscribe<CapturedVideoFrameStoreNotEmpty>(
+        [&calls](const CapturedVideoFrameStoreNotEmpty&) { ++calls; });
 
-    require(notifier.send(CapturedFrameStoreNotEmpty{}),
+    require(notifier.send(CapturedVideoFrameStoreNotEmpty{}),
             "event with a throwing callback must still be dispatched");
     require(calls == 1, "a throwing callback must not stop later callbacks");
     require(throwing_subscription->active() && healthy_subscription->active(),
             "callback failure must not alter subscription lifetime");
 }
 
-void encoded_access_unit_queue_supports_concurrent_spsc_access() {
+void encoded_video_access_unit_queue_supports_concurrent_spsc_access() {
     auto notifier = std::make_shared<DefaultNotifier>();
-    EncodedAccessUnitQueue queue{notifier, 8};
+    EncodedVideoAccessUnitQueue queue{notifier, 8};
     constexpr std::uint64_t kItemCount = 10'000;
     std::atomic_bool order_is_valid{true};
 
     std::jthread producer{[&] {
         for (std::uint64_t sequence = 1; sequence <= kItemCount; ++sequence) {
             auto item = access_unit(sequence);
-            while (queue.try_push(std::move(item)) == EncodedAccessUnitPushResult::Full) {
+            while (queue.try_push(std::move(item)) == EncodedVideoAccessUnitPushResult::Full) {
                 std::this_thread::yield();
             }
         }
@@ -254,7 +254,7 @@ void zero_capacity_is_rejected() {
     auto notifier = std::make_shared<DefaultNotifier>();
     bool frame_store_rejected = false;
     try {
-        [[maybe_unused]] CapturedFrameStore store{notifier, 0};
+        [[maybe_unused]] CapturedVideoFrameStore store{notifier, 0};
     } catch (const std::invalid_argument&) {
         frame_store_rejected = true;
     }
@@ -262,7 +262,7 @@ void zero_capacity_is_rejected() {
 
     bool access_unit_queue_rejected = false;
     try {
-        [[maybe_unused]] EncodedAccessUnitQueue queue{notifier, 0};
+        [[maybe_unused]] EncodedVideoAccessUnitQueue queue{notifier, 0};
     } catch (const std::invalid_argument&) {
         access_unit_queue_rejected = true;
     }
@@ -273,13 +273,13 @@ void zero_capacity_is_rejected() {
 
 int main() {
     try {
-        captured_frame_store_replaces_oldest();
-        captured_frame_store_notifies_empty_to_non_empty_and_clears();
-        encoded_access_unit_queue_preserves_pending_item_and_notifies_edges();
-        encoded_access_unit_queue_clear_reports_discard_and_releases_full_edge();
+        captured_video_frame_store_replaces_oldest();
+        captured_video_frame_store_notifies_empty_to_non_empty_and_clears();
+        encoded_video_access_unit_queue_preserves_pending_item_and_notifies_edges();
+        encoded_video_access_unit_queue_clear_reports_discard_and_releases_full_edge();
         notifier_subscription_lifetime_controls_delivery();
         notifier_callback_failure_does_not_stop_delivery();
-        encoded_access_unit_queue_supports_concurrent_spsc_access();
+        encoded_video_access_unit_queue_supports_concurrent_spsc_access();
         zero_capacity_is_rejected();
     } catch (const std::exception& error) {
         std::cerr << "publisher resource test failed: " << error.what() << '\n';

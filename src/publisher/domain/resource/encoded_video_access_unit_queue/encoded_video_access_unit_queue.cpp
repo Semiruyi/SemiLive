@@ -1,6 +1,6 @@
-#include "publisher/domain/resource/encoded_access_unit_queue/encoded_access_unit_queue.hpp"
+#include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue.hpp"
 
-#include "publisher/domain/resource/encoded_access_unit_queue/encoded_access_unit_queue_events.hpp"
+#include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue_events.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -8,20 +8,20 @@
 
 namespace semilive::publisher::domain {
 
-EncodedAccessUnitQueue::EncodedAccessUnitQueue(std::shared_ptr<infra::Notifier> notifier,
+EncodedVideoAccessUnitQueue::EncodedVideoAccessUnitQueue(std::shared_ptr<infra::Notifier> notifier,
                                                const std::size_t capacity)
     : notifier_(std::move(notifier)), capacity_(capacity) {
     if (capacity_ == 0) {
-        throw std::invalid_argument("EncodedAccessUnitQueue capacity must be greater than zero");
+        throw std::invalid_argument("EncodedVideoAccessUnitQueue capacity must be greater than zero");
     }
 }
 
-EncodedAccessUnitPushResult EncodedAccessUnitQueue::try_push(EncodedAccessUnit&& access_unit) {
+EncodedVideoAccessUnitPushResult EncodedVideoAccessUnitQueue::try_push(EncodedVideoAccessUnit&& access_unit) {
     bool should_notify_not_empty = false;
     {
         std::lock_guard lock{mutex_};
         if (access_units_.size() == capacity_) {
-            return EncodedAccessUnitPushResult::Full;
+            return EncodedVideoAccessUnitPushResult::Full;
         }
 
         should_notify_not_empty = access_units_.empty();
@@ -31,16 +31,16 @@ EncodedAccessUnitPushResult EncodedAccessUnitQueue::try_push(EncodedAccessUnit&&
     if (should_notify_not_empty) {
         notify_not_empty();
     }
-    return EncodedAccessUnitPushResult::Accepted;
+    return EncodedVideoAccessUnitPushResult::Accepted;
 }
 
-bool EncodedAccessUnitQueue::full() const noexcept {
+bool EncodedVideoAccessUnitQueue::full() const noexcept {
     std::lock_guard lock{mutex_};
     return access_units_.size() == capacity_;
 }
 
-std::optional<EncodedAccessUnit> EncodedAccessUnitQueue::try_pop() {
-    std::optional<EncodedAccessUnit> result;
+std::optional<EncodedVideoAccessUnit> EncodedVideoAccessUnitQueue::try_pop() {
+    std::optional<EncodedVideoAccessUnit> result;
     bool should_notify_not_full = false;
     {
         std::lock_guard lock{mutex_};
@@ -58,12 +58,12 @@ std::optional<EncodedAccessUnit> EncodedAccessUnitQueue::try_pop() {
     return result;
 }
 
-bool EncodedAccessUnitQueue::empty() const noexcept {
+bool EncodedVideoAccessUnitQueue::empty() const noexcept {
     std::lock_guard lock{mutex_};
     return access_units_.empty();
 }
 
-std::size_t EncodedAccessUnitQueue::clear() noexcept {
+std::size_t EncodedVideoAccessUnitQueue::clear() noexcept {
     bool should_notify_not_full = false;
     std::size_t removed = 0;
     {
@@ -78,36 +78,36 @@ std::size_t EncodedAccessUnitQueue::clear() noexcept {
     return removed;
 }
 
-std::size_t EncodedAccessUnitQueue::size() const noexcept {
+std::size_t EncodedVideoAccessUnitQueue::size() const noexcept {
     std::lock_guard lock{mutex_};
     return access_units_.size();
 }
 
-std::size_t EncodedAccessUnitQueue::capacity() const noexcept {
+std::size_t EncodedVideoAccessUnitQueue::capacity() const noexcept {
     return capacity_;
 }
 
-std::size_t EncodedAccessUnitQueue::peak_size() const noexcept {
+std::size_t EncodedVideoAccessUnitQueue::peak_size() const noexcept {
     std::lock_guard lock{mutex_};
     return peak_size_;
 }
 
-void EncodedAccessUnitQueue::notify_not_empty() noexcept {
+void EncodedVideoAccessUnitQueue::notify_not_empty() noexcept {
     if (!notifier_) {
         return;
     }
     try {
-        (void)notifier_->send(EncodedAccessUnitQueueNotEmpty{});
+        (void)notifier_->send(EncodedVideoAccessUnitQueueNotEmpty{});
     } catch (...) {
     }
 }
 
-void EncodedAccessUnitQueue::notify_not_full() noexcept {
+void EncodedVideoAccessUnitQueue::notify_not_full() noexcept {
     if (!notifier_) {
         return;
     }
     try {
-        (void)notifier_->send(EncodedAccessUnitQueueNotFull{});
+        (void)notifier_->send(EncodedVideoAccessUnitQueueNotFull{});
     } catch (...) {
     }
 }

@@ -5,14 +5,14 @@
 
 namespace semilive::publisher::domain {
 
-class CapturedFrameStoreControl {
+class CapturedVideoFrameStoreControl {
 public:
-    virtual ~CapturedFrameStoreControl() = default;
+    virtual ~CapturedVideoFrameStoreControl() = default;
 
-    CapturedFrameStoreControl(const CapturedFrameStoreControl&) = delete;
-    CapturedFrameStoreControl& operator=(const CapturedFrameStoreControl&) = delete;
-    CapturedFrameStoreControl(CapturedFrameStoreControl&&) = delete;
-    CapturedFrameStoreControl& operator=(CapturedFrameStoreControl&&) = delete;
+    CapturedVideoFrameStoreControl(const CapturedVideoFrameStoreControl&) = delete;
+    CapturedVideoFrameStoreControl& operator=(const CapturedVideoFrameStoreControl&) = delete;
+    CapturedVideoFrameStoreControl(CapturedVideoFrameStoreControl&&) = delete;
+    CapturedVideoFrameStoreControl& operator=(CapturedVideoFrameStoreControl&&) = delete;
 
     [[nodiscard]] virtual std::size_t clear() noexcept = 0;
     [[nodiscard]] virtual std::size_t size() const noexcept = 0;
@@ -21,7 +21,7 @@ public:
     [[nodiscard]] virtual std::uint64_t replaced_count() const noexcept = 0;
 
 protected:
-    CapturedFrameStoreControl() = default;
+    CapturedVideoFrameStoreControl() = default;
 };
 
 }  // namespace semilive::publisher::domain
