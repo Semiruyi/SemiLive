@@ -188,8 +188,8 @@ frame.captured_at = 实际完成本次采集或画面准备的 steady_clock::now
 - 可恢复的暂时状态；
 - 不可恢复错误。
 
-画面结果和错误分类由 `DesktopCaptureBackend` 设计定义。Scheduler 无论采集成功与否都只
-处理调度点；不可恢复错误由 Worker 上报并使发布会话失败。
+画面结果和错误分类由 [DesktopCaptureBackend 设计](desktop-capture-backend.md) 定义。
+Scheduler 无论采集成功与否都只处理调度点；不可恢复错误由 Worker 上报并使发布会话失败。
 
 ## 6. 校验与溢出
 

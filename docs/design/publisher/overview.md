@@ -92,7 +92,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 领域服务 | `H264NalSplitter` | 拆分 Annex-B Access Unit 中的 NAL |
 | 领域服务 | `H264RtpPacketizer` | RFC 6184 Single NAL/FU-A 封包 |
 | 领域服务 | `AudioRtpPacketizer` | 按选定音频格式生成 RTP Payload |
-| 后端契约 | `DesktopCaptureBackend` | 提供最新桌面图像 |
+| 后端契约 | [`DesktopCaptureBackend`](desktop-capture-backend.md) | 提供最新桌面图像 |
 | 后端契约 | `SystemAudioCaptureBackend` | 提供带设备位置和单调时钟关联的 PCM 块 |
 | 后端契约 | `VideoFrameProcessor` | 缩放和像素格式转换 |
 | 后端契约 | `AudioFrameProcessor` | 声道布局、采样格式和采样率转换 |
@@ -248,9 +248,10 @@ flowchart LR
     Clock -. media time .-> AudioCapture
 ```
 
-第一版通过 CPU 内存传递像素。DXGI 后端在释放 acquired frame 前，将有效区域复制到
-由 `CapturedVideoFrame` 独占的紧凑 BGRA 缓冲。GPU 纹理跨模块传递和硬件编码留待性能数据
-证明必要后再设计。
+第一版通过 CPU 内存传递像素。DXGI 后端在释放 acquired frame 前，将有效区域复制到独占的
+紧凑 `DesktopImage`；VideoCaptureWorker 再结合调度信息构造 `CapturedVideoFrame`。GPU
+纹理跨模块传递和硬件编码留待性能数据证明必要后再设计。详细契约见
+[DesktopCaptureBackend 设计](desktop-capture-backend.md)。
 
 ## 6. 线程模型
 
@@ -705,6 +706,8 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 
 ```text
 SyntheticDesktopCaptureBackend
+-> VideoCaptureWorker
+-> CapturedVideoFrameStore
 -> VideoEncoderWorker
 -> FakeVideoEncoderBackend 或 FFmpeg Backend
 -> VideoRtpSenderWorker

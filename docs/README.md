@@ -14,6 +14,8 @@
   生命周期和测试边界。
 - [FrameScheduler 设计](design/publisher/frame-scheduler.md)：视频帧 deadline、媒体时间、
   晚到跳帧及其与 VideoCaptureWorker 的协作。
+- [DesktopCaptureBackend 设计](design/publisher/desktop-capture-backend.md)：桌面输出选择、CPU
+  BGRA 图像契约、DXGI 采集与恢复、鼠标指针合成及 Synthetic 测试后端。
 
 ## 后续文档类型
 
