@@ -1,5 +1,7 @@
 #include "publisher/infrastructure/capture/dxgi_desktop_capture_backend.hpp"
 
+#include "publisher/infrastructure/capture/desktop_pointer_compositor.hpp"
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -17,6 +19,7 @@
 #include <iomanip>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -349,6 +352,22 @@ std::expected<DesktopImage, DesktopCaptureIssue> copy_desktop_image(
     return image;
 }
 
+std::expected<DesktopPointerShapeType, DesktopCaptureIssue> pointer_shape_type(
+    const UINT native_type) {
+    switch (native_type) {
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR:
+            return DesktopPointerShapeType::Color;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME:
+            return DesktopPointerShapeType::Monochrome;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR:
+            return DesktopPointerShapeType::MaskedColor;
+        default:
+            return std::unexpected{
+                make_issue(DesktopCaptureOperation::Pointer,
+                           "DXGI returned an unsupported desktop pointer shape type")};
+    }
+}
+
 }  // namespace
 
 struct DxgiDesktopCaptureBackend::Impl {
@@ -404,8 +423,15 @@ struct DxgiDesktopCaptureBackend::Impl {
         duplication = std::move(new_duplication);
         duplication_description_ = duplication_description;
         staging.Reset();
+        reset_pointer_state();
         needs_reinitialize = false;
         return {};
+    }
+
+    void reset_pointer_state() noexcept {
+        pointer_shape.reset();
+        pointer_position = {};
+        pointer_visible = false;
     }
 
     void release_capture_resources() noexcept {
@@ -416,6 +442,7 @@ struct DxgiDesktopCaptureBackend::Impl {
         output.Reset();
         adapter.Reset();
         duplication_description_ = {};
+        reset_pointer_state();
     }
 
     void begin_recovery() noexcept {
@@ -460,6 +487,70 @@ struct DxgiDesktopCaptureBackend::Impl {
         return {};
     }
 
+    [[nodiscard]] std::expected<void, DesktopCaptureIssue> update_pointer(
+        const DXGI_OUTDUPL_FRAME_INFO& frame_info) {
+        if (!compose_pointer) {
+            return {};
+        }
+
+        if (frame_info.LastMouseUpdateTime.QuadPart != 0) {
+            pointer_visible = frame_info.PointerPosition.Visible != FALSE;
+            // DXGI defines Position as the shape's top-left corner in the
+            // output-relative, display-oriented coordinate space. HotSpot is
+            // informational and must not be subtracted here.
+            pointer_position = DesktopPointerPosition{
+                frame_info.PointerPosition.Position.x,
+                frame_info.PointerPosition.Position.y,
+            };
+        }
+
+        if (frame_info.PointerShapeBufferSize == 0) {
+            return {};
+        }
+
+        std::vector<std::byte> shape_buffer(frame_info.PointerShapeBufferSize);
+        DXGI_OUTDUPL_POINTER_SHAPE_INFO shape_info{};
+        UINT required_size = 0;
+        auto result = duplication->GetFramePointerShape(
+            static_cast<UINT>(shape_buffer.size()),
+            shape_buffer.data(),
+            &required_size,
+            &shape_info);
+        if (result == DXGI_ERROR_MORE_DATA && required_size > shape_buffer.size()) {
+            shape_buffer.resize(required_size);
+            result = duplication->GetFramePointerShape(
+                static_cast<UINT>(shape_buffer.size()),
+                shape_buffer.data(),
+                &required_size,
+                &shape_info);
+        }
+        if (FAILED(result)) {
+            return std::unexpected{
+                make_issue(DesktopCaptureOperation::Pointer,
+                           result,
+                           "failed to retrieve the DXGI desktop pointer shape")};
+        }
+        if (required_size > shape_buffer.size()) {
+            return std::unexpected{
+                make_issue(DesktopCaptureOperation::Pointer,
+                           "DXGI desktop pointer shape exceeded its reported buffer size")};
+        }
+        shape_buffer.resize(required_size);
+
+        const auto type_result = pointer_shape_type(shape_info.Type);
+        if (!type_result) {
+            return std::unexpected{type_result.error()};
+        }
+        pointer_shape = DesktopPointerShape{
+            *type_result,
+            shape_info.Width,
+            shape_info.Height,
+            shape_info.Pitch,
+            std::move(shape_buffer),
+        };
+        return {};
+    }
+
     ComPtr<IDXGIAdapter1> adapter;
     ComPtr<IDXGIOutput> output;
     ComPtr<ID3D11Device> device;
@@ -469,7 +560,11 @@ struct DxgiDesktopCaptureBackend::Impl {
     DXGI_OUTPUT_DESC output_description{};
     DXGI_OUTDUPL_DESC duplication_description_{};
     std::wstring output_device_name;
+    std::optional<DesktopPointerShape> pointer_shape;
+    DesktopPointerPosition pointer_position{};
     std::thread::id owner_thread;
+    bool compose_pointer = false;
+    bool pointer_visible = false;
     bool open = false;
     bool needs_reinitialize = false;
 };
@@ -489,11 +584,6 @@ DxgiDesktopCaptureBackend::open(
             make_issue(DesktopCaptureOperation::Open,
                        "DXGI desktop capture backend is already open")};
     }
-    if (config.compose_pointer) {
-        return std::unexpected{
-            make_issue(DesktopCaptureOperation::Pointer,
-                       "DXGI pointer composition is not implemented yet")};
-    }
     if (config.output.selection != DesktopOutputSelection::Primary &&
         config.output.selection != DesktopOutputSelection::Index) {
         return std::unexpected{
@@ -508,10 +598,12 @@ DxgiDesktopCaptureBackend::open(
 
     const std::wstring output_device_name = candidate->description.DeviceName;
     const auto output_name = narrow_output_name(candidate->description.DeviceName);
+    impl_->compose_pointer = config.compose_pointer;
     const auto initialize_result =
         impl_->initialize(std::move(*candidate), DesktopCaptureOperation::Open);
     if (!initialize_result) {
         impl_->release_capture_resources();
+        impl_->compose_pointer = false;
         return std::unexpected{initialize_result.error()};
     }
 
@@ -574,6 +666,17 @@ DesktopCaptureResult DxgiDesktopCaptureBackend::capture_latest() {
     }
     AcquiredFrame acquired_frame{impl_->duplication.Get()};
 
+    const auto pointer_result = impl_->update_pointer(frame_info);
+    if (!pointer_result) {
+        if (is_recoverable(pointer_result.error())) {
+            (void)acquired_frame.release();
+            impl_->begin_recovery();
+            return DesktopCaptureObservation{
+                DesktopTemporarilyUnavailable{pointer_result.error()}};
+        }
+        return std::unexpected{pointer_result.error()};
+    }
+
     ComPtr<ID3D11Texture2D> desktop_texture;
     const auto texture_result = desktop_resource.As(&desktop_texture);
     if (FAILED(texture_result)) {
@@ -633,6 +736,17 @@ DesktopCaptureResult DxgiDesktopCaptureBackend::capture_latest() {
         return std::unexpected{image_result.error()};
     }
 
+    if (impl_->compose_pointer && impl_->pointer_visible && impl_->pointer_shape) {
+        const auto compose_result = compose_desktop_pointer(
+            *image_result, *impl_->pointer_shape, impl_->pointer_position);
+        if (!compose_result) {
+            return std::unexpected{
+                make_issue(DesktopCaptureOperation::Pointer,
+                           "failed to compose the DXGI desktop pointer: " +
+                               compose_result.error())};
+        }
+    }
+
     const auto release_result = acquired_frame.release();
     if (FAILED(release_result)) {
         auto error = make_issue(
@@ -653,6 +767,7 @@ void DxgiDesktopCaptureBackend::close() noexcept {
     impl_->release_capture_resources();
     impl_->output_device_name.clear();
     impl_->owner_thread = {};
+    impl_->compose_pointer = false;
     impl_->open = false;
     impl_->needs_reinitialize = false;
 }

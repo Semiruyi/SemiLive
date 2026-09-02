@@ -229,8 +229,8 @@ Desktop Duplication 的桌面纹理不保证包含鼠标指针。`compose_pointe
 - 根据 frame metadata 更新指针可见性和位置；
 - 在形状 metadata 到达时更新缓存，未更新时继续使用最近有效形状；
 - 支持 Color、Monochrome 和 Masked Color 三类 DXGI 指针形状；
-- 将桌面坐标换算为当前输出和规范化旋转后的图像坐标；
-- 根据 hotspot 定位并裁剪落在图像边界之外的部分；
+- 使用 DXGI 给出的输出相对、显示方向坐标；它与规范化旋转后的图像坐标一致；
+- `PointerPosition.Position` 已表示形状左上角，`HotSpot` 不参与绘制；裁剪落在图像边界之外的部分；
 - 按 DXGI 对应的 alpha、AND/XOR 规则合成，不把系统指针资源交给调用方。
 
 只有鼠标位置、形状或可见性变化也算新的桌面状态，返回新的 `DesktopImage`。这样 Worker 缓存

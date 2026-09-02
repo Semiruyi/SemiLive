@@ -29,11 +29,14 @@ void backend_enforces_device_independent_lifecycle_rules() {
                     capture_contract::DesktopCaptureOperation::Acquire,
             "DXGI capture before open must fail as an acquire operation");
 
-    const auto pointer_open = backend.open({});
-    require(!pointer_open &&
-                pointer_open.error().operation ==
-                    capture_contract::DesktopCaptureOperation::Pointer,
-            "DXGI backend must explicitly reject pointer composition until it is implemented");
+    capture_contract::DesktopCaptureConfig invalid_config;
+    invalid_config.output.selection =
+        static_cast<capture_contract::DesktopOutputSelection>(255);
+    const auto invalid_open = backend.open(invalid_config);
+    require(!invalid_open &&
+                invalid_open.error().operation ==
+                    capture_contract::DesktopCaptureOperation::Open,
+            "DXGI backend must reject an invalid output selection before device access");
 
     backend.close();
     backend.close();
@@ -42,7 +45,6 @@ void backend_enforces_device_independent_lifecycle_rules() {
 void backend_captures_an_interactive_desktop_frame() {
     DxgiDesktopCaptureBackend backend;
     capture_contract::DesktopCaptureConfig config;
-    config.compose_pointer = false;
 
     const auto opened = backend.open(config);
     require(opened.has_value(),
