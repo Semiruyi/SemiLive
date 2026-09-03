@@ -82,6 +82,8 @@ struct DesktopImage {
 
 `DesktopImage` 不包含 `sequence`、PTS 或 `captured_at`。Worker 在一次采集调用完成后，根据当前
 调度点构造 `CapturedVideoFrame`，并把当时的 `steady_clock::now()` 记录为 `captured_at`。
+Backend 返回值仍是独占的值对象，不承担跨线程共享策略；Worker 把其中的 BGRA vector 移入
+共享不可变 `BgraFrameBuffer`，该转换不复制像素存储。
 
 ### 2.3 查询结果
 
@@ -256,8 +258,8 @@ Desktop Duplication 的桌面纹理不保证包含鼠标指针。`compose_pointe
 
 暂时不可用期间 Worker 可以继续按调度点复用最近有效画面，使短暂的锁屏、模式切换或 DXGI
 重建不会立刻中断视频。Worker 必须另设连续失败次数或持续时间上限；超过上限后把会话标记为
-失败，不能无限用陈旧画面伪装正常采集。该阈值在 `VideoCaptureWorker` 设计中确定，不属于
-Backend 配置。
+失败，不能无限用陈旧画面伪装正常采集。该阈值在
+[VideoCaptureWorker 设计](video-capture-worker.md) 中确定，不属于 Backend 配置。
 
 后端错误必须保留发生操作和原生错误码。高频重试由统计计数，日志只记录首次进入恢复、恢复
 成功和最终失败，避免每个调度点重复打印同一个 HRESULT。
@@ -280,7 +282,7 @@ CapturedVideoFrameStore
 
 在当前 tick 上：
 
-- 有 `DesktopImage` 时，Worker 将其移入最近画面缓存；
+- 有 `DesktopImage` 时，Worker 将其像素存储移入新的共享不可变缓冲，并替换最近画面引用；
 - NoChange 或暂时不可用且已有缓存时，Worker 从缓存构造重复帧；
 - 尚无缓存时不生成空白帧；
 - 每个实际发布帧获得连续的新 `sequence`、当前 tick 的 `presentation_time`，以及图像准备完成
@@ -353,7 +355,7 @@ Backend 可以返回完成统计所需的低频 metadata，但统计对象仍由
 2. 实现 `DxgiDesktopCaptureBackend` 的单输出、完整帧复制和无指针路径；
 3. 加入旋转、尺寸变化和 access-lost 重建；
 4. 实现并测试三类 DXGI 指针形状合成；
-5. 设计并实现 `VideoCaptureWorker`，接入 FrameScheduler、缓存和 FrameStore；
+5. 按 [VideoCaptureWorker 设计](video-capture-worker.md) 实现调度、缓存和 FrameStore 接入；
 6. 运行 Synthetic 与真实 DXGI 的 M1 编码链路验证。
 
 ## 11. 已决定
@@ -361,7 +363,8 @@ Backend 可以返回完成统计所需的低频 metadata，但统计对象仍由
 - 首版每个会话只采集一个输出，默认主显示器；
 - Backend 只轮询最新桌面状态，不拥有线程、帧率等待、PTS 或重复帧策略；
 - `AcquireNextFrame` 使用零超时，停止和 deadline 等待由 Worker 管理；
-- Backend 返回独占、紧凑、顶部起始、正向的 CPU BGRA 图像；
+- Backend 返回独占、紧凑、顶部起始、正向的 CPU BGRA 图像，Worker 在跨线程发布边界将其
+  移入共享不可变缓冲；
 - DXGI GPU 资源不跨 Backend 边界；
 - 完整帧复制优先，dirty/move rect 和 GPU 零拷贝延后到性能数据证明必要时；
 - 暂时不可用与致命失败分开表达，Backend 不做无界重试；

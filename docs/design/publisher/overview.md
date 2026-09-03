@@ -77,7 +77,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 层次 | 模块 | 职责 |
 |---|---|---|
 | 应用层 | `PublisherController` | 校验会话状态，编排启动、停止、等待和失败汇聚 |
-| 领域 Worker | `VideoCaptureWorker` | 按目标帧率采集并发布 BGRA 帧 |
+| 领域 Worker | [`VideoCaptureWorker`](video-capture-worker.md) | 按目标帧率采集并发布 BGRA 帧 |
 | 领域 Worker | `VideoEncoderWorker` | 消费 BGRA 帧，完成像素处理和 H.264 编码 |
 | 领域 Worker | `VideoRtpSenderWorker` | 保存可选码流、拆分 NAL、RTP 封包和 UDP 发送 |
 | 领域 Worker | `AudioCaptureWorker` | 事件驱动采集 WASAPI Loopback PCM，并保留设备时钟信息 |
@@ -249,9 +249,11 @@ flowchart LR
 ```
 
 第一版通过 CPU 内存传递像素。DXGI 后端在释放 acquired frame 前，将有效区域复制到独占的
-紧凑 `DesktopImage`；VideoCaptureWorker 再结合调度信息构造 `CapturedVideoFrame`。GPU
-纹理跨模块传递和硬件编码留待性能数据证明必要后再设计。详细契约见
-[DesktopCaptureBackend 设计](desktop-capture-backend.md)。
+紧凑 `DesktopImage`；VideoCaptureWorker 把它的像素存储移动到共享不可变
+`BgraFrameBuffer`，再结合调度信息构造 `CapturedVideoFrame`。新画面和重复帧都不需要在 Worker
+中额外复制整张图像。GPU 纹理跨模块传递和硬件编码留待性能数据证明必要后再设计。详细契约
+见 [DesktopCaptureBackend 设计](desktop-capture-backend.md) 和
+[VideoCaptureWorker 设计](video-capture-worker.md)。
 
 ## 6. 线程模型
 
@@ -271,15 +273,21 @@ flowchart LR
 需要 COM 的 Worker 在线程入口初始化适合后端要求的 Apartment，并在线程退出前逆序关闭
 后端和 COM；WASAPI 对象不得跨到其他 Worker 线程调用。
 
-首版 Worker 状态机保持最小：
+Worker 构造时启动常驻线程并进入 `Idle`，析构时请求线程永久退出并 join。一次发布会话的停止
+不退出常驻线程；Controller 可以在完整停止和清理后开始下一次会话。首版会话状态机保持最小：
 
 ```text
-Constructed -> Starting -> Running -> Stopping -> Stopped
-                              \-> Failed
+Idle -> Starting -> Running -> Stopping -> Idle
+  ^        |          |           ^
+  |        |          +-> Failed -+
+  +--------+
+   启动失败
 ```
 
-本阶段是进程内单次发布会话，不为 Worker 增加通用命令队列和多会话状态机。音频与视频各自
-使用独立 Socket 和线程，不要求 `DatagramSink` 支持多线程并发调用。
+同一时刻只允许一个发布会话。Worker 对外提供同步会话接口，内部使用有限的 typed command
+队列和 promise/future，把控制操作串行切换到所属线程；首版不向 Controller 暴露 future 或通用
+Command Bus。详细控制协议见 [VideoCaptureWorker 设计](video-capture-worker.md)。音频与视频
+各自使用独立 Socket 和线程，不要求 `DatagramSink` 支持多线程并发调用。
 
 ## 7. 领域数据
 
@@ -290,11 +298,15 @@ Constructed -> Starting -> Running -> Stopping -> Stopped
 ### 7.1 CapturedVideoFrame
 
 ```cpp
-struct CapturedVideoFrame {
+struct BgraFrameBuffer {
     std::vector<std::byte> bgra;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::uint32_t stride = 0;
+};
+
+struct CapturedVideoFrame {
+    std::shared_ptr<const BgraFrameBuffer> image;
     std::uint64_t sequence = 0;
     MediaTime presentation_time;
     std::chrono::steady_clock::time_point captured_at;
@@ -303,8 +315,11 @@ struct CapturedVideoFrame {
 
 约束：
 
-- `bgra` 由该对象独占，跨线程后不再被采集后端修改；
-- `stride` 首版为紧凑行宽，仍保留字段避免接口依赖隐含假设；
+- `image` 非空，并在 Worker、FrameStore 和编码线程之间共享不可变像素所有权；
+- Worker 将 Backend 返回的 `DesktopImage::bgra` 移入新缓冲，不再复制像素；
+- 新画面替换 Worker 的缓存引用，重复帧复用同一缓冲但具有独立的帧 metadata；
+- 缓冲从创建起不保留任何可变别名，最后一个共享引用释放时自动销毁；
+- `BgraFrameBuffer::stride` 首版为紧凑行宽，仍保留字段避免接口依赖隐含假设；
 - `sequence` 按调度输出帧递增，重复桌面画面也产生新序号；
 - `presentation_time` 由调度时刻相对会话原点换算，跨编码和发送边界保持不变；
 - `captured_at` 来自单调时钟，只用于计算采集后的处理延迟，不使用系统墙上时间。
@@ -601,8 +616,11 @@ PublisherController: start_publishing / stop_publishing / state / stats
 
 诊断 Recorder 打开文件失败时只禁用本次记录并报告非致命错误，不阻止 Sender 启动。
 
-同一阶段内先发出启动命令，再逐一等待确认，避免人为制造过大的轨道启动偏差。不要求两个
-采集后端在同一时刻产生首个媒体单元；它们依靠共享时间轴表达实际开始位置。
+同一阶段内按确定顺序同步启动 Worker。首版接受有界的初始化顺序差异，不要求两个采集后端在
+同一时刻产生首个媒体单元；Capture Worker 在各自后端成功打开后记录真实 `track_start`，并
+依靠共享时间轴表达实际开始位置。Video Capture 的接口和确认语义见
+[VideoCaptureWorker 设计](video-capture-worker.md)。若后续测量证明多轨道必须严格并行启动，
+再让现有内部 completion future 穿过 Worker 接口。
 
 任一阶段启动失败时，Controller 按逆序停止所有已经启动的轨道模块、清理资源并返回结构化
 错误；Worker 模块及其常驻线程仍由 Composition 持有。
@@ -612,8 +630,8 @@ PublisherController: start_publishing / stop_publishing / state / stats
 Ctrl+C 触发正常停止：
 
 ```text
-1. Controller 同时命令 VideoCaptureWorker 和 AudioCaptureWorker 停止生产
-2. 等待所有已启用的 Capture Worker 确认不再产生新媒体
+1. Controller 按确定顺序同步停止 VideoCaptureWorker 和 AudioCaptureWorker
+2. 确认所有已启用的 Capture Worker 不再产生新媒体
 3. 命令两个 Encoder Worker 分别排空输入并 flush 编码器
 4. 等待两个 Encoder Worker 回到 Idle
 5. 命令两个 RTP Sender Worker 分别排空编码输出并关闭 socket
@@ -622,15 +640,15 @@ Ctrl+C 触发正常停止：
 8. Controller 通过 Control 接口防御性 clear 所有空资源并回到 Idle
 ```
 
-同一阶段先向两条轨道发出命令，再等待确认；不先完整停止视频后再停止音频。因为所有领域
-资源都有固定容量，正常停止时的剩余工作量有明确上界。
+Capture Backend 查询非阻塞且调度等待可由 StopCommand 唤醒，因此同步停止是有界操作。因为
+所有领域资源都有固定容量，正常停止时的剩余工作量也有明确上界。
 
 ### 11.4 致命错误
 
 Worker 只上报第一个致命错误。首版任一已启用轨道失败均视为发布会话失败。Controller 收到
-错误后向所有已启用 Worker 发送立即停止命令；
-Worker 自己的条件变量由控制命令直接唤醒，不依赖资源通知。致命错误路径不保证排空媒体
-数据，Controller 通过 Control 接口清理残留数据，优先保证及时、确定地回到 Failed 状态。
+错误 hint 后在控制执行上下文中按错误停机顺序同步停止所有已启用 Worker；Worker 自己的条件
+变量由 StopCommand 直接唤醒，不依赖资源通知。致命错误路径不保证排空媒体数据，Controller
+通过 Control 接口清理残留数据，优先保证及时、确定地回到 Failed 状态。
 
 错误包含：
 
@@ -700,7 +718,8 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 - Annex-B NAL 拆分；
 - RTP Header、序列号、时间戳和 Marker；
 - FU-A 边界、重组一致性和 MTU 上界；
-- Worker 停止、后端失败和 pending output。
+- Worker 停止、后端失败和 pending output；
+- VideoCaptureWorker 的启动确认、可停止 deadline 等待、画面复用、恢复超时和重复会话。
 
 ### 13.2 无设备集成测试
 

@@ -140,6 +140,9 @@ deadline 恰好等于 `now` 时，该 tick 不算过期，Worker 可以立即处
 
 ## 5. 与 VideoCaptureWorker 协作
 
+Worker 的线程、控制和错误恢复完整语义见
+[VideoCaptureWorker 设计](video-capture-worker.md)，本节只描述 Scheduler 的调用顺序。
+
 推荐循环：
 
 ```text

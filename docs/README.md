@@ -16,6 +16,8 @@
   晚到跳帧及其与 VideoCaptureWorker 的协作。
 - [DesktopCaptureBackend 设计](design/publisher/desktop-capture-backend.md)：桌面输出选择、CPU
   BGRA 图像契约、DXGI 采集与恢复、鼠标指针合成及 Synthetic 测试后端。
+- [VideoCaptureWorker 设计](design/publisher/video-capture-worker.md)：常驻采集线程、Controller
+  控制接口、固定帧率采集循环、重复帧、恢复上限和错误传播。
 
 ## 后续文档类型
 
