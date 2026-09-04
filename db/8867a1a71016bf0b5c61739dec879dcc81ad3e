@@ -1,0 +1,14 @@
+src/publisher/domain/worker/video_capture_worker/default_video_capture_worker.cpp
+  h_71186a0a6bfb09 1-694
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "2.5.918",
+  "base_commit_sha": "db8867a1a71016bf0b5c61739dec879dcc81ad3e",
+  "prompts": {},
+  "humans": {
+    "h_71186a0a6bfb09": {
+      "author": "wuyuanyi <wuyuanyi@h-partners.com>"
+    }
+  }
+}
