@@ -78,7 +78,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 |---|---|---|
 | 应用层 | `PublisherController` | 校验会话状态，编排启动、停止、等待和失败汇聚 |
 | 领域 Worker | [`VideoCaptureWorker`](video-capture-worker.md) | 按目标帧率采集并发布 BGRA 帧 |
-| 领域 Worker | `VideoEncoderWorker` | 消费 BGRA 帧，完成像素处理和 H.264 编码 |
+| 领域 Worker | [`VideoEncoderWorker`](video-encoding.md) | 消费 BGRA 帧并编排 H.264 编码与背压 |
 | 领域 Worker | `VideoRtpSenderWorker` | 保存可选码流、拆分 NAL、RTP 封包和 UDP 发送 |
 | 领域 Worker | `AudioCaptureWorker` | 事件驱动采集 WASAPI Loopback PCM，并保留设备时钟信息 |
 | 领域 Worker | `AudioEncoderWorker` | 消费 PCM，完成格式处理、重采样和音频编码 |
@@ -94,15 +94,13 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 领域服务 | `AudioRtpPacketizer` | 按选定音频格式生成 RTP Payload |
 | 后端契约 | [`DesktopCaptureBackend`](desktop-capture-backend.md) | 提供最新桌面图像 |
 | 后端契约 | `SystemAudioCaptureBackend` | 提供带设备位置和单调时钟关联的 PCM 块 |
-| 后端契约 | `VideoFrameProcessor` | 缩放和像素格式转换 |
 | 后端契约 | `AudioFrameProcessor` | 声道布局、采样格式和采样率转换 |
-| 后端契约 | `VideoEncoderBackend` | 接收处理后的视频帧并输出 H.264 AU |
+| 后端契约 | [`VideoEncoderBackend`](video-encoding.md) | 接收 BGRA 帧，完成预处理并输出 H.264 AU |
 | 后端契约 | `AudioEncoderBackend` | 接收处理后的 PCM 并输出编码音频包 |
 | 后端契约 | `DatagramSink` | 发送一个完整数据报 |
 | 基础设施 | `DxgiDesktopCaptureBackend` | D3D11/DXGI Desktop Duplication 实现 |
 | 基础设施 | `SyntheticDesktopCaptureBackend` | 可重复测试画面实现 |
-| 基础设施 | `SwsVideoFrameProcessor` | FFmpeg libswscale 像素处理实现 |
-| 基础设施 | `FfmpegH264EncoderBackend` | FFmpeg H.264 编码实现 |
+| 基础设施 | `FfmpegH264EncoderBackend` | 封装 libswscale 与 FFmpeg/libx264 的 H.264 编码实现 |
 | 基础设施 | `WasapiLoopbackCaptureBackend` | Windows 系统音频采集实现 |
 | 基础设施 | `SwrAudioFrameProcessor` | FFmpeg libswresample 音频处理实现 |
 | 基础设施 | `FfmpegAudioEncoderBackend` | 首版选定格式的 FFmpeg 音频编码实现 |
@@ -140,7 +138,6 @@ flowchart TB
         VideoAuQueue[EncodedVideoAccessUnitQueue]
         VideoCaptureBackend[Dxgi 或 Synthetic Capture Backend]
         VideoScheduler[FrameScheduler]
-        VideoProcessor[SwsVideoFrameProcessor]
         VideoEncoderBackend[FfmpegH264EncoderBackend]
         VideoPacketizer[H264NalSplitter + H264RtpPacketizer]
         VideoFileRecorder[Optional Async H264FileRecorder]
@@ -153,7 +150,6 @@ flowchart TB
         VideoScheduler -.-> VideoCapture
         VideoCapture --> VideoFrameStore
         VideoFrameStore --> VideoEncoder
-        VideoProcessor -.-> VideoEncoder
         VideoEncoderBackend -.-> VideoEncoder
         VideoEncoder --> VideoAuQueue
         VideoAuQueue --> VideoSender
@@ -543,14 +539,18 @@ RTP 规则：
 - SPS/PPS 在 IDR 前以带内方式提供；
 - 首轮视频闭环不实现 STAP-A、RTCP 和丢包恢复。
 
-`VideoEncoderBackend` 保持可替换，但首版真实编码实现只请求 FFmpeg `libx264`，不同时维护
-多个编码器分支。普通无设备 CI 使用 Fake Encoder；启用 FFmpeg 集成验证的环境找不到
-`libx264` 时必须给出明确配置错误。关闭 B 帧以避免帧重排，简化首版实时链路的 PTS/DTS
-关系并降低延迟。硬件编码留作视频闭环稳定后的独立增强项。
+`VideoEncoderBackend` 保持可替换，但首版真实编码实现只请求 FFmpeg `libx264`，并在同一 Backend
+内部封装 libswscale 预处理和编码资源，不公开通用 YUV 中间对象或 FFmpeg 类型。普通无设备 CI
+使用 Fake Encoder；启用 FFmpeg 集成验证的环境找不到 `libx264` 时必须给出明确配置错误。关闭
+B 帧以避免帧重排，简化首版实时链路的 PTS/DTS 关系并降低延迟。硬件编码留作视频闭环稳定后
+的独立增强项。
 
-输入桌面不是 16:9 时，`VideoFrameProcessor` 等比缩放到 1920 x 1080 画布并居中填充，禁止
-拉伸或裁掉桌面边缘。填充颜色固定为黑色，缩放区域和填充边界必须可单元测试。DXGI 后端
-提供鼠标指针合成配置，真实桌面发布默认开启；Synthetic 和早期无设备编码闭环不依赖指针。
+输入桌面不是 16:9 时，Backend 等比缩放到 1920 x 1080 画布并居中填充，禁止拉伸或裁掉桌面
+边缘。首版固定 BT.709 limited-range YUV420P，黑边使用对应的 YUV 黑色值；缩放区域和填充
+边界必须可单元测试。预处理与编码首版由同一个 Video Encode Thread 顺序编排，libx264 可以在
+Backend 内部并行；只有性能数据证明持续吞吐不足时才设计独立预处理线程。详细规则见
+[视频编码阶段设计](video-encoding.md)。DXGI 后端提供鼠标指针合成配置，真实桌面发布默认开启；
+Synthetic 和早期无设备编码闭环不依赖指针。
 
 ### 10.2 视频诊断文件
 
@@ -622,8 +622,9 @@ PublisherController: start_publishing / stop_publishing / state / stats
 [VideoCaptureWorker 设计](video-capture-worker.md)。若后续测量证明多轨道必须严格并行启动，
 再让现有内部 completion future 穿过 Worker 接口。
 
-任一阶段启动失败时，Controller 按逆序停止所有已经启动的轨道模块、清理资源并返回结构化
-错误；Worker 模块及其常驻线程仍由 Composition 持有。
+任一阶段启动失败时，Controller 按逆序 abort 所有已经启动的轨道模块、清理资源并返回结构化
+错误；此时不要求排空尚未形成完整运行链路的数据。Worker 模块及其常驻线程仍由 Composition
+持有。
 
 ### 11.3 正常停止
 
@@ -632,7 +633,7 @@ Ctrl+C 触发正常停止：
 ```text
 1. Controller 按确定顺序同步停止 VideoCaptureWorker 和 AudioCaptureWorker
 2. 确认所有已启用的 Capture Worker 不再产生新媒体
-3. 命令两个 Encoder Worker 分别排空输入并 flush 编码器
+3. 以 Drain 模式命令两个 Encoder Worker 分别排空输入并 flush 编码器
 4. 等待两个 Encoder Worker 回到 Idle
 5. 命令两个 RTP Sender Worker 分别排空编码输出并关闭 socket
 6. 等待两个 Sender Worker 回到 Idle
@@ -641,14 +642,16 @@ Ctrl+C 触发正常停止：
 ```
 
 Capture Backend 查询非阻塞且调度等待可由 StopCommand 唤醒，因此同步停止是有界操作。因为
-所有领域资源都有固定容量，正常停止时的剩余工作量也有明确上界。
+所有领域资源都有固定容量，正常停止时的剩余工作量也有明确上界。Encoder 的 Drain/Abort
+语义见 [视频编码阶段设计](video-encoding.md)。
 
 ### 11.4 致命错误
 
 Worker 只上报第一个致命错误。首版任一已启用轨道失败均视为发布会话失败。Controller 收到
-错误 hint 后在控制执行上下文中按错误停机顺序同步停止所有已启用 Worker；Worker 自己的条件
-变量由 StopCommand 直接唤醒，不依赖资源通知。致命错误路径不保证排空媒体数据，Controller
-通过 Control 接口清理残留数据，优先保证及时、确定地回到 Failed 状态。
+错误 hint 后在控制执行上下文中按错误停机顺序同步停止所有已启用 Worker；Encoder 使用 Abort
+而不是等待下游腾空，Worker 自己的条件变量由 StopCommand 直接唤醒，不依赖资源通知。致命
+错误路径不保证排空媒体数据，Controller 通过 Control 接口清理残留数据，优先保证及时、确定地
+回到 Failed 状态。
 
 错误包含：
 
@@ -682,7 +685,7 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 - 编码输入和输出帧数；
 - 关键帧数量；
 - 编码失败数量；
-- 编码平均、最大耗时；
+- 预处理、codec 和完整编码阶段的平均、最大耗时；
 - H.264 输出字节数和估算码率；
 - RTP 包数、发送字节数和 UDP 错误数；
 - 诊断文件接受、写入和拒绝的 AU 与字节数，以及打开、写入和过载失败次数；
@@ -775,7 +778,6 @@ src/publisher/
   contracts/
     capture/desktop_capture_backend.*
     capture/system_audio_capture_backend.*
-    processing/video_frame_processor.*
     processing/audio_frame_processor.*
     encoder/video_encoder_backend.*
     encoder/audio_encoder_backend.*
@@ -796,6 +798,7 @@ src/publisher/
     worker/audio_capture/...
     worker/audio_encoder/...
     worker/audio_rtp_sender/...
+    processing/video_placement.*
     rtp/h264_nal_splitter.*
     rtp/h264_rtp_packetizer.*
     rtp/audio_rtp_packetizer.*
@@ -811,7 +814,6 @@ src/publisher/
     capture/synthetic_desktop_capture_backend.*
     capture/wasapi_loopback_capture_backend.*
     capture/synthetic_system_audio_capture_backend.*
-    ffmpeg/sws_video_frame_processor.*
     ffmpeg/ffmpeg_h264_encoder_backend.*
     ffmpeg/swr_audio_frame_processor.*
     ffmpeg/ffmpeg_audio_encoder_backend.*
@@ -845,7 +847,9 @@ CMake 的部署目标对应三个最终程序。Publisher 额外提供一个不�
 - 首版不支持同类多轨，至少启用一条轨道；
 - 任一已启用轨道发生致命错误时，整个发布会话失败；
 - BGRA CPU 帧跨采集和编码线程传递；
-- 像素处理与编码由同一个 Worker 线程执行；
+- 领域层只暴露接收 BGRA 并输出 H.264 AU 的 VideoEncoderBackend，不暴露通用 YUV 中间对象；
+- 像素处理与编码由同一个 Worker 线程执行，FFmpeg Backend 内部按转换和 codec 职责拆分；
+- 正常停止排空并 flush Encoder，故障停止使用 Abort 丢弃剩余内部工作；
 - 采集帧资源容量 2，满时替换最旧帧；
 - 编码 AU 资源容量 4，满时保留 pending AU 并等待；
 - 资源只提供非阻塞操作和边界通知，Worker 自己负责条件等待；

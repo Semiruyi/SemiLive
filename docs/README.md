@@ -18,6 +18,8 @@
   BGRA 图像契约、DXGI 采集与恢复、鼠标指针合成及 Synthetic 测试后端。
 - [VideoCaptureWorker 设计](design/publisher/video-capture-worker.md)：常驻采集线程、Controller
   控制接口、固定帧率采集循环、重复帧、恢复上限和错误传播。
+- [视频编码阶段设计](design/publisher/video-encoding.md)：BGRA 预处理与 H.264 Backend 边界、
+  Encoder Worker 线程、AU 背压、Drain/Abort 停止语义和性能演进条件。
 
 ## 后续文档类型
 

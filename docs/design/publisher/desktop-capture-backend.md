@@ -221,8 +221,8 @@ Desktop Duplication 图像可能按照未旋转表面提供。DXGI 后端读取�
 
 显示模式、旋转、DPI 布局或输出连接变化可能使 duplication 失效。后端丢弃依赖旧设备和旧
 尺寸的全部 GPU 资源，在后续调用中重新定位同一输出并重建。恢复后的第一张图像可以具有新
-尺寸；Worker 直接替换最近画面，后续 `VideoFrameProcessor` 仍负责转换到固定 1920 x 1080
-输出，因此源分辨率变化不会改变编码轨道配置。
+尺寸；Worker 直接替换最近画面，后续 [`VideoEncoderBackend`](video-encoding.md) 内部的预处理
+仍负责转换到固定 1920 x 1080 输出，因此源分辨率变化不会改变编码轨道配置。
 
 ### 4.4 鼠标指针合成
 

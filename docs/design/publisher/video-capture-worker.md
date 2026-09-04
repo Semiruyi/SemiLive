@@ -378,7 +378,7 @@ StopCommand 可能在 `capture_latest()` 执行期间入队。Backend 查询是�
 | fatal error | 丢弃会话状态并关闭 Backend | 不输出，进入 `Failed` |
 
 `DesktopImage` 或 `DesktopNoChange` 都表示后端当前可用，结束连续恢复区间。尺寸变化的新图像直接
-替换旧缓存；固定输出尺寸由后续 `VideoFrameProcessor` 负责。
+替换旧缓存；固定输出尺寸由后续 [`VideoEncoderBackend`](video-encoding.md) 内部的图像预处理负责。
 
 尚未取得第一张有效图像时不生成黑帧。当前 tick 仍被消耗并计入 `missing_initial_frames`，随后
 正常推进 Scheduler，避免取得首图后突发补帧。
