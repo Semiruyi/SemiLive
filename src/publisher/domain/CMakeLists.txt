@@ -6,3 +6,4 @@ target_link_libraries(semilive_publisher_core PRIVATE
 
 add_subdirectory(resource)
 add_subdirectory(timing)
+add_subdirectory(worker)

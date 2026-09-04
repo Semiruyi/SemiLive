@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -38,10 +39,9 @@ void require(const bool condition, const std::string_view message) {
 
 CapturedVideoFrame frame(const std::uint64_t sequence) {
     CapturedVideoFrame result;
-    result.bgra.resize(4);
-    result.width = 1;
-    result.height = 1;
-    result.stride = 4;
+    result.image = std::make_shared<const semilive::publisher::domain::BgraFrameBuffer>(
+        semilive::publisher::domain::BgraFrameBuffer{
+            std::vector<std::byte>(4, std::byte{0x01}), 1, 1, 4});
     result.sequence = sequence;
     result.presentation_time =
         std::chrono::milliseconds{static_cast<std::int64_t>(sequence) * 10};
