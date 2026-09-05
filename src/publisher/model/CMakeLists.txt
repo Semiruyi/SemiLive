@@ -5,4 +5,5 @@ target_sources(semilive_publisher_core PRIVATE
     video/encoded_video_access_unit.hpp
     video/frame_rate.hpp
     video/video_dimensions.hpp
+    video/video_placement.hpp
 )

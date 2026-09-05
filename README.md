@@ -7,8 +7,10 @@ SemiLive 是一个正在开发的 C++23 实时音视频项目，目标是完成�
 
 ## 当前状态
 
-项目目前只有工程骨架，尚未实现采集、编码或网络传输能力。现有三个可执行程序仅用于
-验证 Windows/Linux 构建、测试和持续集成基线：
+项目已经完成 Publisher 视频采集阶段的领域资源、帧调度、Worker、Synthetic Backend 和
+Windows DXGI Backend，并开始实现基于 FFmpeg 的视频预处理与编码基础设施。H.264 编码、
+网络传输、Receiver 和 Relay 尚未形成可运行闭环。现有三个可执行程序仍主要用于验证
+Windows/Linux 构建、测试和持续集成基线：
 
 - `semilive_publisher`：发布端占位程序；
 - `semilive_relay`：Linux 转发端占位程序；
@@ -47,10 +49,16 @@ Publisher 首版音视频模块边界、线程模型、共享时间轴和运行�
 ## 构建
 
 Windows 开发环境使用 MSYS2 UCRT64。打开 **MSYS2 UCRT64** 终端，用一条命令完成
-系统更新并安装编译器、CMake、Ninja 和 spdlog：
+系统更新并安装编译器、CMake、Ninja、pkg-config、spdlog 和 FFmpeg 开发库：
 
 ```sh
-pacman -Syu --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-spdlog
+pacman -Syu --needed \
+  mingw-w64-ucrt-x86_64-gcc \
+  mingw-w64-ucrt-x86_64-cmake \
+  mingw-w64-ucrt-x86_64-ninja \
+  mingw-w64-ucrt-x86_64-pkgconf \
+  mingw-w64-ucrt-x86_64-spdlog \
+  mingw-w64-ucrt-x86_64-ffmpeg
 ```
 
 仍在 MSYS2 UCRT64 终端中配置、构建并测试：
@@ -61,11 +69,14 @@ cmake --build --preset windows-debug
 ctest --preset windows-debug
 ```
 
-Linux 开发环境需要 C++23 编译器、CMake、Ninja 和 spdlog：
+Linux 开发环境需要 C++23 编译器、CMake、Ninja、pkg-config、spdlog、libavutil 和
+libswscale：
 
 ```sh
 sudo apt-get update
-sudo apt-get install --yes ninja-build libspdlog-dev
+sudo apt-get install --yes \
+  g++ cmake ninja-build pkg-config \
+  libspdlog-dev libavutil-dev libswscale-dev
 cmake --preset linux-debug
 cmake --build --preset linux-debug
 ctest --preset linux-debug

@@ -1,4 +1,4 @@
-#include "publisher/domain/video/video_placement.hpp"
+#include "publisher/domain/video/video_placement_calculator.hpp"
 
 #include <cstdint>
 
@@ -19,7 +19,7 @@ constexpr std::uint32_t centered_even_offset(
 
 }  // namespace
 
-std::expected<VideoPlacement, VideoPlacementError>
+std::expected<model::VideoPlacement, VideoPlacementError>
 calculate_video_placement(const model::VideoDimensions input,
                           const model::VideoDimensions output) noexcept {
     if (input.width == 0 || input.height == 0) {
@@ -51,7 +51,7 @@ calculate_video_placement(const model::VideoDimensions input,
         return std::unexpected{VideoPlacementError::ScaledImageTooSmall};
     }
 
-    return VideoPlacement{
+    return model::VideoPlacement{
         centered_even_offset(output.width, scaled_width),
         centered_even_offset(output.height, scaled_height),
         scaled_width,

@@ -22,7 +22,14 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install --yes ninja-build libspdlog-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            ninja-build \
+            pkg-config \
+            libspdlog-dev \
+            libavutil-dev \
+            libswscale-dev
 
       - name: Configure
         run: cmake --preset linux-debug

@@ -787,6 +787,7 @@ src/publisher/
     video/encoded_video_access_unit.hpp
     video/frame_rate.hpp
     video/video_dimensions.hpp
+    video/video_placement.hpp
     audio/captured_audio_block.hpp
     audio/encoded_audio_packet.hpp
 
@@ -809,7 +810,7 @@ src/publisher/
     worker/audio_capture/...
     worker/audio_encoder/...
     worker/audio_rtp_sender/...
-    video/video_placement.*
+    video/video_placement_calculator.*
     rtp/h264_nal_splitter.*
     rtp/h264_rtp_packetizer.*
     rtp/audio_rtp_packetizer.*

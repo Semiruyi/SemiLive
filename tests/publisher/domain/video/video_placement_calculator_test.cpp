@@ -1,4 +1,4 @@
-#include "publisher/domain/video/video_placement.hpp"
+#include "publisher/domain/video/video_placement_calculator.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -11,10 +11,10 @@
 
 namespace {
 
-using semilive::publisher::domain::VideoPlacement;
 using semilive::publisher::domain::VideoPlacementError;
 using semilive::publisher::domain::calculate_video_placement;
 using semilive::publisher::model::VideoDimensions;
+using semilive::publisher::model::VideoPlacement;
 
 void require(const bool condition, const std::string_view message) {
     if (!condition) {
@@ -120,11 +120,11 @@ int main() {
         invalid_dimensions_are_rejected();
         unrepresentable_extreme_aspect_ratio_is_rejected();
     } catch (const std::exception& error) {
-        std::cerr << "publisher video placement tests failed: "
+        std::cerr << "publisher video placement calculator tests failed: "
                   << error.what() << '\n';
         return EXIT_FAILURE;
     }
 
-    std::cout << "publisher video placement tests passed\n";
+    std::cout << "publisher video placement calculator tests passed\n";
     return EXIT_SUCCESS;
 }

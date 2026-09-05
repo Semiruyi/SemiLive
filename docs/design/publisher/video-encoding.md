@@ -52,14 +52,15 @@ CapturedVideoFrame（CPU BGRA）
 
 ```text
 FfmpegH264EncoderBackend
-├── VideoPlacement             纯整数缩放区域计算，不依赖 FFmpeg
-├── SwsFrameConverter          管理 SwsContext、YUV AVFrame 和缓冲复用
+├── VideoPlacementCalculator   纯整数缩放区域计算，不依赖 FFmpeg
+├── SwsFrameConverter          管理 SwsContext 和内部缩放帧
 └── FfmpegH264Encoder          管理 AVCodecContext、send/receive 和 flush
 ```
 
-`VideoPlacement` 可以作为不依赖基础设施的纯值计算单独测试。其余辅助类属于 FFmpeg 实现细节，可以在
-基础设施测试中分别验证，但不成为 Worker 的注入依赖。`FfmpegH264EncoderBackend` 是唯一实现
-视频编码 Backend 契约的对象，保证 FFmpeg 帧引用和编码延迟完全封装在同一资源所有者中。
+`VideoPlacement` 是共享模型中的纯值对象；它的领域计算器不依赖基础设施，可以单独测试。其余辅助类
+属于 FFmpeg 实现细节，可以在基础设施测试中分别验证，但不成为 Worker 的注入依赖。
+`FfmpegH264EncoderBackend` 是唯一实现视频编码 Backend 契约的对象，保证 FFmpeg 帧引用和编码延迟
+完全封装在同一资源所有者中。
 
 ### 2.2 首版线程边界
 
@@ -220,7 +221,8 @@ public:
 
 ### 4.2 等比缩放与黑边
 
-`VideoPlacement` 使用整数运算计算能够完整放入固定画布的最大缩放矩形：
+领域层的 `VideoPlacementCalculator` 使用整数运算，产生共享模型中的 `VideoPlacement`，表示能够完整
+放入固定画布的最大缩放矩形：
 
 ```cpp
 struct VideoPlacement {
@@ -237,7 +239,8 @@ struct VideoPlacement {
 - 缩放宽高向下调整为非零偶数，以满足 YUV420P 色度采样；
 - `x`、`y` 也调整为偶数，左右或上下黑边因此最多相差 2 像素；
 - 缩放矩形不能超出输出画布；
-- 每帧先把完整 YUV 画布填黑，再把缩放结果写入矩形；
+- 有黑边时，先把完整 YUV 画布填黑，再把缩放结果写入矩形；
+- placement 完整覆盖输出画布时，swscale 直接写入最终帧，不执行黑边填充和中间帧复制；
 - 横屏、竖屏、超宽、超高和与输出同比例输入使用同一算法。
 
 需要单元测试输入和输出同比例、4:3、竖屏、极端宽高比、奇数尺寸、最小有效尺寸以及乘法溢出
@@ -260,8 +263,16 @@ struct VideoPlacement {
 SwsContext 的输入尺寸变化时可以重建，YUV 输出画布和 H.264 编码器保持固定，因此 DXGI 恢复后
 出现新的桌面尺寸不会改变已打开的视频轨道。转换失败不得复用上一帧 YUV 结果继续编码。
 
-Backend 复用可写的 YUV `AVFrame`。若编码器仍持有上一帧引用，先通过 FFmpeg 的引用计数和
-可写检查取得安全缓冲，不能覆盖编码器仍可能读取的内存。该生命周期完全留在 Backend 内部。
+存在黑边时，swscale 写入内部对齐且可复用的缩放帧，转换成功后再把有效平面逐行复制到输出画布的
+placement。这样不把大画布的子区域伪装成拥有独立行尾 padding 的目标帧，也不会让极窄缩放区域的
+实现细节污染黑边。placement 完整覆盖输出画布时不存在子画布边界，转换器直接把最终帧作为
+swscale 输出，省去中间帧写入、黑边填充和逐行复制。内部缩放帧不是线程边界或共享媒体模型，只是
+带黑边路径的转换器缓冲。
+
+Backend 使用 RAII 持有并复用最终编码输入 `AVFrame`，以引用参数把目标帧交给 Converter 填充；
+Converter 不返回目标帧的拥有或借用指针。若编码器仍持有上一帧的 Buffer 引用，Converter 在写入前
+通过 `av_frame_make_writable()` 取得安全缓冲，不能覆盖编码器仍可能读取的内存。最终帧所有权、
+FFmpeg Buffer 引用计数和生命周期完全留在 Backend 内部。
 
 ## 5. 编码与时间戳
 
@@ -453,7 +464,7 @@ gap 和一次输入暂时没有编码输出不是错误。
 
 ### 10.1 单元测试
 
-- VideoPlacement 的同比例、横向黑边、纵向黑边、奇数尺寸和溢出边界；
+- VideoPlacementCalculator 的同比例、横向黑边、纵向黑边、奇数尺寸和溢出边界；
 - Worker 构造后处于 Idle，Backend 尚未打开；
 - Backend 的 open、encode、flush、close 全部发生在 Worker 线程；
 - NotEmpty 唤醒、空资源不忙轮询和通知合并；
@@ -496,7 +507,7 @@ Synthetic 或 DXGI Backend
 
 ## 11. 实现顺序
 
-1. 实现并测试 `VideoPlacement`；
+1. 实现并测试共享 `VideoPlacement` 与领域 `VideoPlacementCalculator`；
 2. 定义 `VideoEncoderBackend`、Fake Backend 所需契约和错误类型；
 3. 实现 `SwsFrameConverter` 与 `FfmpegH264Encoder` 内部组件；
 4. 实现 `FfmpegH264EncoderBackend` 并完成独立 FFmpeg 集成测试；

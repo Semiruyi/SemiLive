@@ -1,12 +1,12 @@
-add_executable(semilive_publisher_video_placement_test
-    video_placement_test.cpp
+add_executable(semilive_publisher_video_placement_calculator_test
+    video_placement_calculator_test.cpp
 )
-target_link_libraries(semilive_publisher_video_placement_test PRIVATE
+target_link_libraries(semilive_publisher_video_placement_calculator_test PRIVATE
     semilive_publisher_core
 )
-semilive_enable_warnings(semilive_publisher_video_placement_test)
+semilive_enable_warnings(semilive_publisher_video_placement_calculator_test)
 
 add_test(
-    NAME semilive_publisher_video_placement
-    COMMAND semilive_publisher_video_placement_test
+    NAME semilive_publisher_video_placement_calculator
+    COMMAND semilive_publisher_video_placement_calculator_test
 )
