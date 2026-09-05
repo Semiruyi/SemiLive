@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/domain/media/captured_video_frame.hpp"
+#include "publisher/model/video/captured_video_frame.hpp"
 
 #include <cstdint>
 
@@ -20,7 +20,8 @@ public:
     CapturedVideoFrameSink(CapturedVideoFrameSink&&) = delete;
     CapturedVideoFrameSink& operator=(CapturedVideoFrameSink&&) = delete;
 
-    [[nodiscard]] virtual CapturedVideoFramePushResult try_push(CapturedVideoFrame&& frame) = 0;
+    [[nodiscard]] virtual CapturedVideoFramePushResult try_push(
+        model::CapturedVideoFrame&& frame) = 0;
 
 protected:
     CapturedVideoFrameSink() = default;

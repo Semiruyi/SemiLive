@@ -1,13 +1,13 @@
 #pragma once
 
-#include "publisher/domain/timing/media_time.hpp"
+#include "publisher/model/media_time.hpp"
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
-namespace semilive::publisher::domain {
+namespace semilive::publisher::model {
 
 struct EncodedVideoAccessUnit {
     std::vector<std::byte> annex_b;
@@ -17,4 +17,4 @@ struct EncodedVideoAccessUnit {
     std::chrono::steady_clock::time_point captured_at{};
 };
 
-}  // namespace semilive::publisher::domain
+}  // namespace semilive::publisher::model

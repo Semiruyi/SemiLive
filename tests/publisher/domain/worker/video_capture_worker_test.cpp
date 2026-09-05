@@ -30,6 +30,7 @@ using namespace std::chrono_literals;
 
 namespace capture_contract = semilive::publisher::contracts::capture;
 namespace capture_infra = semilive::publisher::infra::capture;
+namespace model = semilive::publisher::model;
 namespace publisher = semilive::publisher::domain;
 
 using semilive::publisher::infra::DefaultNotifier;
@@ -59,7 +60,7 @@ publisher::VideoCaptureSessionConfig config(
     return publisher::VideoCaptureSessionConfig{
         {},
         publisher::SessionTimeline{std::chrono::steady_clock::now()},
-        publisher::FrameRate{200, 1},
+        model::FrameRate{200, 1},
         recovery_timeout,
     };
 }
@@ -347,7 +348,7 @@ void stop_wakes_a_far_frame_deadline() {
     publisher::DefaultVideoCaptureWorker worker{
         std::make_unique<RecordingBackend>(state), store, notifier};
     auto slow_config = config();
-    slow_config.frame_rate = publisher::FrameRate{1, 10};
+    slow_config.frame_rate = model::FrameRate{1, 10};
 
     require(worker.start(std::move(slow_config)).has_value(),
             "slow frame-rate session must start");
@@ -383,7 +384,7 @@ void dxgi_worker_integration() {
     publisher::DefaultVideoCaptureWorker worker{
         std::make_unique<capture_infra::DxgiDesktopCaptureBackend>(), store, notifier};
     auto live_config = config(5s);
-    live_config.frame_rate = publisher::FrameRate{30, 1};
+    live_config.frame_rate = model::FrameRate{30, 1};
 
     const auto started = worker.start(std::move(live_config));
     require(started.has_value(), "DXGI worker must open the primary desktop");

@@ -22,9 +22,10 @@ public:
                                     std::size_t capacity = kDefaultCapacity);
     ~EncodedVideoAccessUnitQueue() override = default;
 
-    [[nodiscard]] EncodedVideoAccessUnitPushResult try_push(EncodedVideoAccessUnit&& access_unit) override;
+    [[nodiscard]] EncodedVideoAccessUnitPushResult try_push(
+        model::EncodedVideoAccessUnit&& access_unit) override;
     [[nodiscard]] bool full() const noexcept override;
-    [[nodiscard]] std::optional<EncodedVideoAccessUnit> try_pop() override;
+    [[nodiscard]] std::optional<model::EncodedVideoAccessUnit> try_pop() override;
     [[nodiscard]] bool empty() const noexcept override;
     [[nodiscard]] std::size_t clear() noexcept override;
     [[nodiscard]] std::size_t size() const noexcept override;
@@ -38,7 +39,7 @@ private:
     std::shared_ptr<infra::Notifier> notifier_;
     const std::size_t capacity_;
     mutable std::mutex mutex_;
-    std::deque<EncodedVideoAccessUnit> access_units_;
+    std::deque<model::EncodedVideoAccessUnit> access_units_;
     std::size_t peak_size_ = 0;
 };
 

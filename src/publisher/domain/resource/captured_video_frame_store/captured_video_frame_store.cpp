@@ -16,7 +16,8 @@ CapturedVideoFrameStore::CapturedVideoFrameStore(std::shared_ptr<infra::Notifier
     }
 }
 
-CapturedVideoFramePushResult CapturedVideoFrameStore::try_push(CapturedVideoFrame&& frame) {
+CapturedVideoFramePushResult CapturedVideoFrameStore::try_push(
+    model::CapturedVideoFrame&& frame) {
     CapturedVideoFramePushResult result = CapturedVideoFramePushResult::Accepted;
     bool should_notify_not_empty = false;
     {
@@ -37,13 +38,13 @@ CapturedVideoFramePushResult CapturedVideoFrameStore::try_push(CapturedVideoFram
     return result;
 }
 
-std::optional<CapturedVideoFrame> CapturedVideoFrameStore::try_pop() {
+std::optional<model::CapturedVideoFrame> CapturedVideoFrameStore::try_pop() {
     std::lock_guard lock{mutex_};
     if (frames_.empty()) {
         return std::nullopt;
     }
 
-    CapturedVideoFrame frame = std::move(frames_.front());
+    model::CapturedVideoFrame frame = std::move(frames_.front());
     frames_.pop_front();
     return frame;
 }

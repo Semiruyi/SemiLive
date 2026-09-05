@@ -2,6 +2,8 @@
 
 #include "publisher/contracts/capture/desktop_capture_backend.hpp"
 #include "publisher/domain/timing/frame_scheduler.hpp"
+#include "publisher/model/media_time.hpp"
+#include "publisher/model/video/frame_rate.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -14,14 +16,14 @@ namespace semilive::publisher::domain {
 struct VideoCaptureSessionConfig {
     contracts::capture::DesktopCaptureConfig capture;
     SessionTimeline timeline;
-    FrameRate frame_rate{30, 1};
+    model::FrameRate frame_rate{30, 1};
     std::chrono::milliseconds recovery_timeout{5000};
 };
 
 struct VideoCaptureStarted {
     contracts::capture::DesktopCaptureInfo source;
     std::chrono::steady_clock::time_point track_start;
-    MediaTime first_presentation_time{};
+    model::MediaTime first_presentation_time{};
 };
 
 enum class VideoCaptureWorkerState : std::uint8_t {

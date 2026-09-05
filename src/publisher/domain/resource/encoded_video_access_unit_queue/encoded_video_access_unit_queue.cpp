@@ -16,7 +16,8 @@ EncodedVideoAccessUnitQueue::EncodedVideoAccessUnitQueue(std::shared_ptr<infra::
     }
 }
 
-EncodedVideoAccessUnitPushResult EncodedVideoAccessUnitQueue::try_push(EncodedVideoAccessUnit&& access_unit) {
+EncodedVideoAccessUnitPushResult EncodedVideoAccessUnitQueue::try_push(
+    model::EncodedVideoAccessUnit&& access_unit) {
     bool should_notify_not_empty = false;
     {
         std::lock_guard lock{mutex_};
@@ -39,8 +40,9 @@ bool EncodedVideoAccessUnitQueue::full() const noexcept {
     return access_units_.size() == capacity_;
 }
 
-std::optional<EncodedVideoAccessUnit> EncodedVideoAccessUnitQueue::try_pop() {
-    std::optional<EncodedVideoAccessUnit> result;
+std::optional<model::EncodedVideoAccessUnit>
+EncodedVideoAccessUnitQueue::try_pop() {
+    std::optional<model::EncodedVideoAccessUnit> result;
     bool should_notify_not_full = false;
     {
         std::lock_guard lock{mutex_};

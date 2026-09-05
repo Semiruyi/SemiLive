@@ -36,8 +36,8 @@ UnsignedClockRep nonnegative_clock_difference(const Clock::time_point later,
     return static_cast<UnsignedClockRep>(later_count) + earlier_magnitude;
 }
 
-MediaTime media_time_between(const Clock::time_point later,
-                             const Clock::time_point earlier) {
+model::MediaTime media_time_between(const Clock::time_point later,
+                                    const Clock::time_point earlier) {
     const auto clock_ticks = nonnegative_clock_difference(later, earlier);
     if (clock_ticks > static_cast<UnsignedClockRep>(
                           std::numeric_limits<ClockRep>::max())) {
@@ -45,18 +45,19 @@ MediaTime media_time_between(const Clock::time_point later,
     }
 
     const Clock::duration clock_duration{static_cast<ClockRep>(clock_ticks)};
-    const auto media_time = std::chrono::duration_cast<MediaTime>(clock_duration);
-    if (media_time < MediaTime::zero() ||
+    const auto media_time =
+        std::chrono::duration_cast<model::MediaTime>(clock_duration);
+    if (media_time < model::MediaTime::zero() ||
         std::chrono::duration_cast<Clock::duration>(media_time) != clock_duration) {
         throw std::overflow_error{"session media time loses clock precision"};
     }
     return media_time;
 }
 
-Clock::duration clock_duration_for(const MediaTime media_time) {
+Clock::duration clock_duration_for(const model::MediaTime media_time) {
     const auto clock_duration = std::chrono::duration_cast<Clock::duration>(media_time);
     if (clock_duration < Clock::duration::zero() ||
-        std::chrono::duration_cast<MediaTime>(clock_duration) != media_time) {
+        std::chrono::duration_cast<model::MediaTime>(clock_duration) != media_time) {
         throw std::overflow_error{"frame offset is not representable by the steady clock"};
     }
     return clock_duration;
@@ -87,7 +88,7 @@ std::uint64_t rounded_divide(const std::uint64_t numerator,
 }  // namespace
 
 FrameScheduler::FrameScheduler(const SessionTimeline timeline,
-                               const FrameRate frame_rate,
+                               const model::FrameRate frame_rate,
                                const Clock::time_point track_start)
     : timeline_{timeline}, frame_rate_{frame_rate}, track_start_{track_start} {
     if (frame_rate_.numerator == 0 || frame_rate_.denominator == 0) {
@@ -143,12 +144,14 @@ FrameSchedule FrameScheduler::advance_after(const Clock::time_point now) {
     return FrameSchedule{make_tick(selected_index), skipped_ticks};
 }
 
-MediaTime FrameScheduler::frame_offset(const std::uint64_t schedule_index) const {
+model::MediaTime FrameScheduler::frame_offset(
+    const std::uint64_t schedule_index) const {
     const auto rate_numerator = static_cast<std::uint64_t>(frame_rate_.numerator);
     const auto whole_rate_periods = schedule_index / rate_numerator;
     const auto remaining_index = schedule_index % rate_numerator;
     const auto maximum_nanoseconds =
-        static_cast<std::uint64_t>(std::numeric_limits<MediaTime::rep>::max());
+        static_cast<std::uint64_t>(
+            std::numeric_limits<model::MediaTime::rep>::max());
 
     if (whole_rate_periods > maximum_nanoseconds / nanoseconds_per_rate_numerator_) {
         throw std::overflow_error{"frame offset exceeds MediaTime range"};
@@ -166,12 +169,14 @@ MediaTime FrameScheduler::frame_offset(const std::uint64_t schedule_index) const
     if (fractional_nanoseconds > maximum_nanoseconds - whole_nanoseconds) {
         throw std::overflow_error{"frame offset exceeds MediaTime range"};
     }
-    return MediaTime{static_cast<MediaTime::rep>(whole_nanoseconds + fractional_nanoseconds)};
+    return model::MediaTime{static_cast<model::MediaTime::rep>(
+        whole_nanoseconds + fractional_nanoseconds)};
 }
 
 FrameTick FrameScheduler::make_tick(const std::uint64_t schedule_index) const {
     const auto offset = frame_offset(schedule_index);
-    const auto maximum_media_time = std::numeric_limits<MediaTime::rep>::max();
+    const auto maximum_media_time =
+        std::numeric_limits<model::MediaTime::rep>::max();
     if (offset.count() > maximum_media_time - first_presentation_time_.count()) {
         throw std::overflow_error{"frame presentation time exceeds MediaTime range"};
     }

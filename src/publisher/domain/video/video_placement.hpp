@@ -1,18 +1,11 @@
 #pragma once
 
+#include "publisher/model/video/video_dimensions.hpp"
+
 #include <cstdint>
 #include <expected>
 
 namespace semilive::publisher::domain {
-
-struct VideoDimensions {
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
-
-    [[nodiscard]] friend constexpr bool operator==(
-        const VideoDimensions&,
-        const VideoDimensions&) = default;
-};
 
 struct VideoPlacement {
     std::uint32_t x = 0;
@@ -32,6 +25,7 @@ enum class VideoPlacementError : std::uint8_t {
 };
 
 [[nodiscard]] std::expected<VideoPlacement, VideoPlacementError>
-calculate_video_placement(VideoDimensions input, VideoDimensions output) noexcept;
+calculate_video_placement(model::VideoDimensions input,
+                          model::VideoDimensions output) noexcept;
 
 }  // namespace semilive::publisher::domain

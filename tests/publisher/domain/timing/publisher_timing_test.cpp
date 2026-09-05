@@ -1,6 +1,8 @@
 #include "publisher/domain/timing/frame_scheduler.hpp"
-#include "publisher/domain/timing/media_time.hpp"
+#include "publisher/domain/timing/media_time_conversion.hpp"
 #include "publisher/domain/timing/session_timeline.hpp"
+#include "publisher/model/media_time.hpp"
+#include "publisher/model/video/frame_rate.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -14,12 +16,12 @@
 
 namespace {
 
-using semilive::publisher::domain::FrameRate;
 using semilive::publisher::domain::FrameScheduler;
-using semilive::publisher::domain::MediaTime;
 using semilive::publisher::domain::SessionTimeline;
 using semilive::publisher::domain::media_time_to_clock_ticks;
 using semilive::publisher::domain::media_time_to_rtp_timestamp;
+using semilive::publisher::model::FrameRate;
+using semilive::publisher::model::MediaTime;
 using namespace std::chrono_literals;
 
 void require(const bool condition, const std::string_view message) {

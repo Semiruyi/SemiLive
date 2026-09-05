@@ -5,7 +5,7 @@
 #include <memory>
 #include <vector>
 
-namespace semilive::publisher::domain {
+namespace semilive::publisher::model {
 
 struct BgraFrameBuffer {
     std::vector<std::byte> bgra;
@@ -16,4 +16,4 @@ struct BgraFrameBuffer {
 
 using SharedBgraFrameBuffer = std::shared_ptr<const BgraFrameBuffer>;
 
-}  // namespace semilive::publisher::domain
+}  // namespace semilive::publisher::model

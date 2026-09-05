@@ -1,4 +1,4 @@
-#include "publisher/domain/timing/media_time.hpp"
+#include "publisher/domain/timing/media_time_conversion.hpp"
 
 #include <limits>
 #include <stdexcept>
@@ -10,12 +10,12 @@ constexpr std::uint64_t kNanosecondsPerSecond = 1'000'000'000;
 
 }  // namespace
 
-std::uint64_t media_time_to_clock_ticks(const MediaTime media_time,
+std::uint64_t media_time_to_clock_ticks(const model::MediaTime media_time,
                                         const std::uint32_t clock_rate) {
     if (clock_rate == 0) {
         throw std::invalid_argument{"media clock rate must be greater than zero"};
     }
-    if (media_time < MediaTime::zero()) {
+    if (media_time < model::MediaTime::zero()) {
         throw std::invalid_argument{"published media time must not be negative"};
     }
 
@@ -35,7 +35,7 @@ std::uint64_t media_time_to_clock_ticks(const MediaTime media_time,
     return whole_seconds * rate + rounded_fraction;
 }
 
-std::uint32_t media_time_to_rtp_timestamp(const MediaTime media_time,
+std::uint32_t media_time_to_rtp_timestamp(const model::MediaTime media_time,
                                           const std::uint32_t clock_rate,
                                           const std::uint32_t initial_timestamp) {
     const auto ticks = media_time_to_clock_ticks(media_time, clock_rate);

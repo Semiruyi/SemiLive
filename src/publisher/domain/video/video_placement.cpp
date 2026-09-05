@@ -20,8 +20,8 @@ constexpr std::uint32_t centered_even_offset(
 }  // namespace
 
 std::expected<VideoPlacement, VideoPlacementError>
-calculate_video_placement(const VideoDimensions input,
-                          const VideoDimensions output) noexcept {
+calculate_video_placement(const model::VideoDimensions input,
+                          const model::VideoDimensions output) noexcept {
     if (input.width == 0 || input.height == 0) {
         return std::unexpected{VideoPlacementError::EmptyInput};
     }

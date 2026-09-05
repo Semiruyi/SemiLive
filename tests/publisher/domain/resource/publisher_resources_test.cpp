@@ -20,16 +20,17 @@
 
 namespace {
 
-using semilive::publisher::domain::CapturedVideoFrame;
 using semilive::publisher::domain::CapturedVideoFramePushResult;
 using semilive::publisher::domain::CapturedVideoFrameStore;
 using semilive::publisher::domain::CapturedVideoFrameStoreNotEmpty;
-using semilive::publisher::domain::EncodedVideoAccessUnit;
 using semilive::publisher::domain::EncodedVideoAccessUnitPushResult;
 using semilive::publisher::domain::EncodedVideoAccessUnitQueue;
 using semilive::publisher::domain::EncodedVideoAccessUnitQueueNotEmpty;
 using semilive::publisher::domain::EncodedVideoAccessUnitQueueNotFull;
 using semilive::publisher::infra::DefaultNotifier;
+using semilive::publisher::model::BgraFrameBuffer;
+using semilive::publisher::model::CapturedVideoFrame;
+using semilive::publisher::model::EncodedVideoAccessUnit;
 
 void require(const bool condition, const std::string_view message) {
     if (!condition) {
@@ -39,8 +40,8 @@ void require(const bool condition, const std::string_view message) {
 
 CapturedVideoFrame frame(const std::uint64_t sequence) {
     CapturedVideoFrame result;
-    result.image = std::make_shared<const semilive::publisher::domain::BgraFrameBuffer>(
-        semilive::publisher::domain::BgraFrameBuffer{
+    result.image = std::make_shared<const BgraFrameBuffer>(
+        BgraFrameBuffer{
             std::vector<std::byte>(4, std::byte{0x01}), 1, 1, 4});
     result.sequence = sequence;
     result.presentation_time =

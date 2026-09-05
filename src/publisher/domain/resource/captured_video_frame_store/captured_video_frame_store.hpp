@@ -22,8 +22,9 @@ public:
                                 std::size_t capacity = kDefaultCapacity);
     ~CapturedVideoFrameStore() override = default;
 
-    [[nodiscard]] CapturedVideoFramePushResult try_push(CapturedVideoFrame&& frame) override;
-    [[nodiscard]] std::optional<CapturedVideoFrame> try_pop() override;
+    [[nodiscard]] CapturedVideoFramePushResult try_push(
+        model::CapturedVideoFrame&& frame) override;
+    [[nodiscard]] std::optional<model::CapturedVideoFrame> try_pop() override;
     [[nodiscard]] bool empty() const noexcept override;
     [[nodiscard]] std::size_t clear() noexcept override;
     [[nodiscard]] std::size_t size() const noexcept override;
@@ -37,7 +38,7 @@ private:
     std::shared_ptr<infra::Notifier> notifier_;
     const std::size_t capacity_;
     mutable std::mutex mutex_;
-    std::deque<CapturedVideoFrame> frames_;
+    std::deque<model::CapturedVideoFrame> frames_;
     std::size_t peak_size_ = 0;
     std::uint64_t replaced_count_ = 0;
 };

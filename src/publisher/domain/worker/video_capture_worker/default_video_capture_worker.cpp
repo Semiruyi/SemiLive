@@ -454,8 +454,9 @@ DefaultVideoCaptureWorker::adopt_image(DesktopImage image) {
     }
 
     const bool recovered = recovering_since_.has_value();
-    auto shared_image = std::make_shared<const BgraFrameBuffer>(BgraFrameBuffer{
-        std::move(image.bgra), image.width, image.height, image.stride});
+    auto shared_image = std::make_shared<const model::BgraFrameBuffer>(
+        model::BgraFrameBuffer{
+            std::move(image.bgra), image.width, image.height, image.stride});
     latest_image_ = std::move(shared_image);
     recovering_since_.reset();
     last_recovery_issue_.reset();
@@ -499,8 +500,8 @@ DefaultVideoCaptureWorker::publish_frame(const FrameContent content) noexcept {
             "video capture frame state is incomplete")};
     }
 
-    CapturedVideoFrame frame{latest_image_, next_sequence_,
-                             next_tick_->presentation_time, Clock::now()};
+    model::CapturedVideoFrame frame{
+        latest_image_, next_sequence_, next_tick_->presentation_time, Clock::now()};
     try {
         const auto pushed = sink_->try_push(std::move(frame));
         ++next_sequence_;
@@ -640,8 +641,9 @@ void DefaultVideoCaptureWorker::record_capture_time(
     stats_.maximum_capture_time = std::max(stats_.maximum_capture_time, duration);
 }
 
-void DefaultVideoCaptureWorker::record_image(const BgraFrameBuffer& image,
-                                             const bool recovered) noexcept {
+void DefaultVideoCaptureWorker::record_image(
+    const model::BgraFrameBuffer& image,
+    const bool recovered) noexcept {
     std::lock_guard lock{mutex_};
     ++stats_.new_desktop_images;
     stats_.new_image_bytes += image.bgra.size();

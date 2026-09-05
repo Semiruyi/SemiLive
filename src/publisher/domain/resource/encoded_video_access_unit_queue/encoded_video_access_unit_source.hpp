@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/domain/media/encoded_video_access_unit.hpp"
+#include "publisher/model/video/encoded_video_access_unit.hpp"
 
 #include <optional>
 
@@ -15,7 +15,7 @@ public:
     EncodedVideoAccessUnitSource(EncodedVideoAccessUnitSource&&) = delete;
     EncodedVideoAccessUnitSource& operator=(EncodedVideoAccessUnitSource&&) = delete;
 
-    [[nodiscard]] virtual std::optional<EncodedVideoAccessUnit> try_pop() = 0;
+    [[nodiscard]] virtual std::optional<model::EncodedVideoAccessUnit> try_pop() = 0;
     [[nodiscard]] virtual bool empty() const noexcept = 0;
 
 protected:

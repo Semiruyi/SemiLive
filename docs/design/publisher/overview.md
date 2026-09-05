@@ -59,7 +59,8 @@ SemiPlayer 播放。音频模块在视频闭环稳定后实现，但视频阶段
 
 Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频范围裁剪复杂度：
 
-- 应用编排、领域 Worker、领域资源、后端契约和基础设施分层；
+- 应用编排、共享模型、领域 Worker、领域资源、后端契约和基础设施分层；
+- 共享模型只定义跨模块传递的数据和值类型，不依赖领域行为、契约或基础设施；
 - Worker 依赖后端契约，不直接依赖 DXGI、FFmpeg 或 Winsock 具体类型；
 - Worker 拥有并独占自己的线程和有线程亲和性的后端；
 - 相邻 Worker 只通过容量受限的领域资源传递数据；
@@ -77,6 +78,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 层次 | 模块 | 职责 |
 |---|---|---|
 | 应用层 | `PublisherController` | 校验会话状态，编排启动、停止、等待和失败汇聚 |
+| 共享模型 | `MediaTime`、音视频帧和编码单元 | 定义契约、领域模块共同使用的稳定数据和值类型 |
 | 领域 Worker | [`VideoCaptureWorker`](video-capture-worker.md) | 按目标帧率采集并发布 BGRA 帧 |
 | 领域 Worker | [`VideoEncoderWorker`](video-encoding.md) | 消费 BGRA 帧并编排 H.264 编码与背压 |
 | 领域 Worker | `VideoRtpSenderWorker` | 保存可选码流、拆分 NAL、RTP 封包和 UDP 发送 |
@@ -210,7 +212,9 @@ Composition 也不得暴露 Worker、Store 或 Backend 查找接口。
 - `AudioRtpPacketizer` 不知道 socket；
 - `DatagramSink` 不理解 H.264；
 - 视频和音频 Worker 不互相调用，也不共享媒体队列或有状态后端；
-- 基础设施可以依赖契约，契约不得依赖基础设施；
+- 共享模型不得依赖契约、领域模块或基础设施；
+- 契约只能依赖共享模型和标准库，不得依赖领域模块或基础设施；
+- 领域模块可以依赖共享模型和契约，基础设施可以依赖共享模型和契约；
 - 底层模块不得依赖 `PublisherController` 或 `PublisherComposition`；
 - `PublisherComposition` 只管理进程级生命周期，不作为运行期服务定位器。
 
@@ -285,8 +289,9 @@ Idle -> Starting -> Running -> Stopping -> Idle
 Command Bus。详细控制协议见 [VideoCaptureWorker 设计](video-capture-worker.md)。音频与视频
 各自使用独立 Socket 和线程，不要求 `DatagramSink` 支持多线程并发调用。
 
-## 7. 领域数据
+## 7. 共享媒体模型
 
+共享模型只描述跨模块传递的数据，不包含 Worker 状态、队列策略、领域算法或 Backend 接口。
 `MediaTime` 是相对于当前发布会话单调原点的有符号纳秒时长。它表达媒体呈现位置，不携带
 墙上时间，也不等同于任何具体 RTP 时钟值。负值只允许出现在设备时钟初始校准的内部计算
 中，不得进入已发布的媒体对象。
@@ -467,7 +472,7 @@ session_origin = steady_clock::now()
 `SessionTimeline` 在会话运行期间不得改变原点。停止完成且所有 Worker 回到 Idle 后，下一次
 `start_publishing()` 才能建立新的原点；上一次会话的媒体对象必须已经排空或清理。
 
-领域对象使用相对于该原点的 `MediaTime`。`MediaTime` 表示媒体呈现位置，不绑定具体编码器
+共享媒体对象使用相对于该原点的 `MediaTime`。`MediaTime` 表示媒体呈现位置，不绑定具体编码器
 或 RTP 时钟频率：
 
 ```text
@@ -775,6 +780,16 @@ src/publisher/
     publisher_controller.*
     publisher_config.*
 
+  model/
+    media_time.hpp
+    video/bgra_frame_buffer.hpp
+    video/captured_video_frame.hpp
+    video/encoded_video_access_unit.hpp
+    video/frame_rate.hpp
+    video/video_dimensions.hpp
+    audio/captured_audio_block.hpp
+    audio/encoded_audio_packet.hpp
+
   contracts/
     capture/desktop_capture_backend.*
     capture/system_audio_capture_backend.*
@@ -784,10 +799,6 @@ src/publisher/
     transport/datagram_sink.*
 
   domain/
-    media/captured_video_frame.*
-    media/encoded_video_access_unit.*
-    media/captured_audio_block.*
-    media/encoded_audio_packet.*
     resource/captured_video_frame_store/...
     resource/encoded_video_access_unit_queue/...
     resource/captured_audio_block_queue/...
@@ -803,7 +814,7 @@ src/publisher/
     rtp/h264_rtp_packetizer.*
     rtp/audio_rtp_packetizer.*
     timing/frame_scheduler.*
-    timing/media_time.*
+    timing/media_time_conversion.*
     timing/session_timeline.*
     stats/publisher_stats.*
 
@@ -831,7 +842,7 @@ src/publisher/
 目录结构本身制造样板代码。
 
 CMake 的部署目标对应三个最终程序。Publisher 额外提供一个不包含 `main.cpp` 的
-`semilive_publisher_core` 静态库，领域、应用、基础设施和装配子目录通过 `target_sources`
+`semilive_publisher_core` 静态库，共享模型、契约、领域、应用、基础设施和装配子目录通过 `target_sources`
 向 Core 添加实现；Publisher 程序和相关测试统一链接 Core。内部模块不再继续拆分静态库，
 避免把源码目录边界等同于链接边界。
 
@@ -842,12 +853,12 @@ CMake 的部署目标对应三个最终程序。Publisher 额外提供一个不�
 - 设计覆盖音视频，实施先完成视频闭环，再实现音频和音画同步；
 - 不为尚未实现的音频创建占位代码或通用媒体 Graph；
 - 视频和音频各由 Capture、Encoder、RTP Sender 三个 Worker 组成，每个 Worker 独占线程；
-- 两条轨道共享单调会话时间轴，领域媒体时间不绑定 RTP 时钟频率；
+- 两条轨道共享单调会话时间轴，共享模型中的媒体时间不绑定 RTP 时钟频率；
 - 两条轨道拥有独立 SSRC、Payload Type、RTP 状态、UDP 端口、Socket、队列和统计；
 - 首版不支持同类多轨，至少启用一条轨道；
 - 任一已启用轨道发生致命错误时，整个发布会话失败；
 - BGRA CPU 帧跨采集和编码线程传递；
-- 领域层只暴露接收 BGRA 并输出 H.264 AU 的 VideoEncoderBackend，不暴露通用 YUV 中间对象；
+- 后端契约只暴露接收 BGRA 并输出 H.264 AU 的 VideoEncoderBackend，不暴露通用 YUV 中间对象；
 - 像素处理与编码由同一个 Worker 线程执行，FFmpeg Backend 内部按转换和 codec 职责拆分；
 - 正常停止排空并 flush Encoder，故障停止使用 Abort 丢弃剩余内部工作；
 - 采集帧资源容量 2，满时替换最旧帧；

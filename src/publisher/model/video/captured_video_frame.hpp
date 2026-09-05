@@ -1,12 +1,12 @@
 #pragma once
 
-#include "publisher/domain/media/bgra_frame_buffer.hpp"
-#include "publisher/domain/timing/media_time.hpp"
+#include "publisher/model/media_time.hpp"
+#include "publisher/model/video/bgra_frame_buffer.hpp"
 
 #include <chrono>
 #include <cstdint>
 
-namespace semilive::publisher::domain {
+namespace semilive::publisher::model {
 
 struct CapturedVideoFrame {
     SharedBgraFrameBuffer image;
@@ -15,4 +15,4 @@ struct CapturedVideoFrame {
     std::chrono::steady_clock::time_point captured_at{};
 };
 
-}  // namespace semilive::publisher::domain
+}  // namespace semilive::publisher::model

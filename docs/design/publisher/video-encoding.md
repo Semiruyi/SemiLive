@@ -36,7 +36,7 @@ Main 不直接访问 Worker。`PublisherComposition` 创建并持有 Worker，`P
 
 ### 2.1 一个公开 Backend 边界
 
-领域层只定义一个 `VideoEncoderBackend`：
+后端契约层只定义一个 `VideoEncoderBackend`：
 
 ```text
 CapturedVideoFrame（CPU BGRA）
@@ -44,9 +44,9 @@ CapturedVideoFrame（CPU BGRA）
 -> 0..N EncodedVideoAccessUnit（Annex-B H.264）
 ```
 
-不定义公开的 `VideoFrameProcessor` 或通用 `ProcessedVideoFrame`。把 YUV420P 暴露为领域对象会
+不定义公开的 `VideoFrameProcessor` 或通用 `ProcessedVideoFrame`。把 YUV420P 暴露为共享模型会
 迫使接口在以下方案中选择其一：复制整帧、公开危险的非拥有 View，或泄漏 `AVFrame`。首版中
-预处理与编码没有队列边界，单独的领域抽象不能提供与其复杂度相称的替换价值。
+预处理与编码没有队列边界，单独的公开抽象不能提供与其复杂度相称的替换价值。
 
 这不表示实现集中在一个大类或源文件。FFmpeg 基础设施内部按职责拆分：
 
@@ -57,9 +57,9 @@ FfmpegH264EncoderBackend
 └── FfmpegH264Encoder          管理 AVCodecContext、send/receive 和 flush
 ```
 
-`VideoPlacement` 可以作为领域无关的值计算单独测试。其余辅助类属于 FFmpeg 实现细节，可以在
-基础设施测试中分别验证，但不成为 Worker 的注入依赖。`FfmpegH264EncoderBackend` 是唯一跨越
-领域 Backend 契约的对象，保证 FFmpeg 帧引用和编码延迟完全封装在同一资源所有者中。
+`VideoPlacement` 可以作为不依赖基础设施的纯值计算单独测试。其余辅助类属于 FFmpeg 实现细节，可以在
+基础设施测试中分别验证，但不成为 Worker 的注入依赖。`FfmpegH264EncoderBackend` 是唯一实现
+视频编码 Backend 契约的对象，保证 FFmpeg 帧引用和编码延迟完全封装在同一资源所有者中。
 
 ### 2.2 首版线程边界
 
@@ -95,24 +95,28 @@ Capture、Encode 和后续 Send 已经可以并行。Video Encode Thread 顺序�
 
 ## 3. Backend 契约草案
 
+`VideoDimensions`、`FrameRate`、`CapturedVideoFrame` 和 `EncodedVideoAccessUnit` 属于无行为的
+共享模型；编码配置、启动信息、批次诊断、结构化错误和虚接口属于编码契约。契约只能依赖
+共享模型和标准库，不得依赖领域模块或 FFmpeg 基础设施。
+
 ### 3.1 配置与启动信息
 
 ```cpp
 struct VideoDimensions {
-    std::uint32_t width = 1920;
-    std::uint32_t height = 1080;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
 };
 
 struct VideoEncoderConfig {
-    VideoDimensions output;
-    FrameRate frame_rate{30, 1};
+    model::VideoDimensions output{1920, 1080};
+    model::FrameRate frame_rate{30, 1};
     std::uint64_t target_bit_rate = 4'000'000;
     std::uint32_t gop_size = 60;
 };
 
 struct VideoEncoderInfo {
-    VideoDimensions output;
-    FrameRate frame_rate;
+    model::VideoDimensions output;
+    model::FrameRate frame_rate;
     std::uint64_t target_bit_rate = 0;
     std::uint32_t gop_size = 0;
     std::uint32_t maximum_delayed_frames = 0;
@@ -137,7 +141,7 @@ struct VideoEncoderInfo {
 
 ```cpp
 struct VideoEncodeBatch {
-    std::vector<EncodedVideoAccessUnit> access_units;
+    std::vector<model::EncodedVideoAccessUnit> access_units;
     std::chrono::nanoseconds preprocessing_time{};
     std::chrono::nanoseconds codec_time{};
 };
@@ -179,7 +183,7 @@ public:
     open(const VideoEncoderConfig& config) = 0;
 
     [[nodiscard]] virtual std::expected<VideoEncodeBatch, VideoEncoderIssue>
-    encode(const CapturedVideoFrame& frame) = 0;
+    encode(const model::CapturedVideoFrame& frame) = 0;
 
     [[nodiscard]] virtual std::expected<VideoEncodeBatch, VideoEncoderIssue>
     flush() = 0;
@@ -503,7 +507,8 @@ Synthetic 或 DXGI Backend
 
 ## 12. 已决定
 
-- 领域层只有一个接收 BGRA、输出 H.264 AU 的 `VideoEncoderBackend`；
+- 后端契约只有一个接收 BGRA、输出 H.264 AU 的 `VideoEncoderBackend`；
+- 编码契约只依赖共享模型和标准库，不依赖领域模块或 FFmpeg 基础设施；
 - 不公开 `VideoFrameProcessor`、通用 YUV 中间对象或 FFmpeg 类型；
 - FFmpeg Backend 内部按 placement、swscale 和 codec 职责拆分类与文件；
 - 首版使用一个 Video Encode Worker，允许 libx264 内部并行；

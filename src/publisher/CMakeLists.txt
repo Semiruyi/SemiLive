@@ -6,9 +6,10 @@ target_compile_features(semilive_publisher_core PUBLIC cxx_std_23)
 semilive_enable_warnings(semilive_publisher_core)
 semilive_target_add_logging(semilive_publisher_core)
 
+add_subdirectory(model)
 add_subdirectory(contracts)
-add_subdirectory(infrastructure)
 add_subdirectory(domain)
+add_subdirectory(infrastructure)
 
 semilive_add_app(semilive_publisher main.cpp)
 target_link_libraries(semilive_publisher PRIVATE

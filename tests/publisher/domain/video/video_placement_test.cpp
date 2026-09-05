@@ -11,10 +11,10 @@
 
 namespace {
 
-using semilive::publisher::domain::VideoDimensions;
 using semilive::publisher::domain::VideoPlacement;
 using semilive::publisher::domain::VideoPlacementError;
 using semilive::publisher::domain::calculate_video_placement;
+using semilive::publisher::model::VideoDimensions;
 
 void require(const bool condition, const std::string_view message) {
     if (!condition) {

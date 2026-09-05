@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/domain/timing/media_time.hpp"
+#include "publisher/model/media_time.hpp"
 
 #include <chrono>
 
@@ -13,7 +13,8 @@ public:
     explicit SessionTimeline(Clock::time_point origin) noexcept;
 
     [[nodiscard]] Clock::time_point origin() const noexcept;
-    [[nodiscard]] MediaTime media_time_at(Clock::time_point presentation_time) const noexcept;
+    [[nodiscard]] model::MediaTime media_time_at(
+        Clock::time_point presentation_time) const noexcept;
 
 private:
     Clock::time_point origin_;

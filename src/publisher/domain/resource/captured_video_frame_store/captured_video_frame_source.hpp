@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/domain/media/captured_video_frame.hpp"
+#include "publisher/model/video/captured_video_frame.hpp"
 
 #include <optional>
 
@@ -15,7 +15,7 @@ public:
     CapturedVideoFrameSource(CapturedVideoFrameSource&&) = delete;
     CapturedVideoFrameSource& operator=(CapturedVideoFrameSource&&) = delete;
 
-    [[nodiscard]] virtual std::optional<CapturedVideoFrame> try_pop() = 0;
+    [[nodiscard]] virtual std::optional<model::CapturedVideoFrame> try_pop() = 0;
     [[nodiscard]] virtual bool empty() const noexcept = 0;
 
 protected:

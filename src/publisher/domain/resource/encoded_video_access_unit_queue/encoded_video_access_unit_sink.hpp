@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/domain/media/encoded_video_access_unit.hpp"
+#include "publisher/model/video/encoded_video_access_unit.hpp"
 
 #include <cstdint>
 
@@ -20,7 +20,8 @@ public:
     EncodedVideoAccessUnitSink(EncodedVideoAccessUnitSink&&) = delete;
     EncodedVideoAccessUnitSink& operator=(EncodedVideoAccessUnitSink&&) = delete;
 
-    [[nodiscard]] virtual EncodedVideoAccessUnitPushResult try_push(EncodedVideoAccessUnit&& access_unit) = 0;
+    [[nodiscard]] virtual EncodedVideoAccessUnitPushResult try_push(
+        model::EncodedVideoAccessUnit&& access_unit) = 0;
     [[nodiscard]] virtual bool full() const noexcept = 0;
 
 protected:

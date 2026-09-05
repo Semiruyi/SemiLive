@@ -113,7 +113,8 @@ private:
     void reset_session_stats(const contracts::capture::DesktopCaptureInfo& source) noexcept;
     void record_processed_tick() noexcept;
     void record_capture_time(Clock::duration elapsed) noexcept;
-    void record_image(const BgraFrameBuffer& image, bool recovered) noexcept;
+    void record_image(const model::BgraFrameBuffer& image,
+                      bool recovered) noexcept;
     void record_no_change(bool recovered) noexcept;
     void record_temporary(bool new_episode) noexcept;
     void record_published(FrameContent content,
@@ -136,7 +137,7 @@ private:
 
     std::optional<FrameScheduler> scheduler_;
     std::optional<FrameTick> next_tick_;
-    SharedBgraFrameBuffer latest_image_;
+    model::SharedBgraFrameBuffer latest_image_;
     std::optional<Clock::time_point> recovering_since_;
     std::optional<contracts::capture::DesktopCaptureIssue> last_recovery_issue_;
     std::chrono::milliseconds recovery_timeout_{5000};
