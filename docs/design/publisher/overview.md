@@ -60,7 +60,7 @@ SemiPlayer 播放。音频模块在视频闭环稳定后实现，但视频阶段
 Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频范围裁剪复杂度：
 
 - 应用编排、共享模型、领域 Worker、领域资源、后端契约和基础设施分层；
-- 共享模型只定义跨模块传递的数据和值类型，不依赖领域行为、契约或基础设施；
+- 共享模型定义跨模块传递的数据、值类型及这些值之间的纯转换，不依赖领域行为、契约或基础设施；
 - Worker 依赖后端契约，不直接依赖 DXGI、FFmpeg 或 Winsock 具体类型；
 - Worker 拥有并独占自己的线程和有线程亲和性的后端；
 - 相邻 Worker 只通过容量受限的领域资源传递数据；
@@ -78,7 +78,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 层次 | 模块 | 职责 |
 |---|---|---|
 | 应用层 | `PublisherController` | 校验会话状态，编排启动、停止、等待和失败汇聚 |
-| 共享模型 | `MediaTime`、音视频帧和编码单元 | 定义契约、领域模块共同使用的稳定数据和值类型 |
+| 共享模型 | `MediaTime`、媒体时钟、音视频帧和编码单元 | 定义各层共同使用的稳定数据、值类型与纯转换 |
 | 领域 Worker | [`VideoCaptureWorker`](video-capture-worker.md) | 按目标帧率采集并发布 BGRA 帧 |
 | 领域 Worker | [`VideoEncoderWorker`](video-encoding.md) | 消费 BGRA 帧并编排 H.264 编码与背压 |
 | 领域 Worker | `VideoRtpSenderWorker` | 保存可选码流、拆分 NAL、RTP 封包和 UDP 发送 |
@@ -291,7 +291,8 @@ Command Bus。详细控制协议见 [VideoCaptureWorker 设计](video-capture-wo
 
 ## 7. 共享媒体模型
 
-共享模型只描述跨模块传递的数据，不包含 Worker 状态、队列策略、领域算法或 Backend 接口。
+共享模型描述跨模块传递的数据，并提供这些值之间不含状态的校验与纯转换；它不包含 Worker
+状态、队列策略、会话策略或 Backend 接口。
 `MediaTime` 是相对于当前发布会话单调原点的有符号纳秒时长。它表达媒体呈现位置，不携带
 墙上时间，也不等同于任何具体 RTP 时钟值。负值只允许出现在设备时钟初始校准的内部计算
 中，不得进入已发布的媒体对象。
@@ -481,10 +482,12 @@ video_clock_ticks = round(media_time * 90000)
 audio_clock_ticks = round(media_time * audio_clock_rate)
 ```
 
-实现使用 `MediaTime = std::chrono::nanoseconds`。`media_time_to_clock_ticks()` 只接受正的时钟
-频率和非负的已发布媒体时间，使用整数运算按最近 tick 舍入，并在宽位结果溢出时失败；不得
-使用浮点换算。`media_time_to_rtp_timestamp()` 将宽位 tick 偏移与随机初始时间戳相加，最终
-按无符号 32 位自然回绕。
+实现使用 `MediaTime = std::chrono::nanoseconds`，并以 `MediaClockRate` 和 `MediaClockTicks`
+区分时钟频率与 tick 数量。模型层的 `media_time_to_clock_ticks()` 接收这两个模型值，使用整数
+运算按最近 tick 舍入，通过 `expected` 报告无效频率、负媒体时间和宽位结果溢出；不得使用浮点
+换算，也不得提供 tick 到裸整数的隐式转换。RTP 模块的
+`media_clock_ticks_to_rtp_timestamp()` 再将宽位 tick 偏移与随机初始时间戳相加，最终按无符号
+32 位自然回绕；RTP 协议语义不进入通用模型转换。
 
 视频摘要：
 
@@ -781,6 +784,7 @@ src/publisher/
     publisher_config.*
 
   model/
+    media_clock.*
     media_time.hpp
     video/bgra_frame_buffer.hpp
     video/captured_video_frame.hpp
@@ -788,6 +792,7 @@ src/publisher/
     video/frame_rate.hpp
     video/video_dimensions.hpp
     video/video_placement.hpp
+    video/video_placement_calculator.*
     audio/captured_audio_block.hpp
     audio/encoded_audio_packet.hpp
 
@@ -810,12 +815,11 @@ src/publisher/
     worker/audio_capture/...
     worker/audio_encoder/...
     worker/audio_rtp_sender/...
-    video/video_placement_calculator.*
+    rtp/rtp_timestamp.*
     rtp/h264_nal_splitter.*
     rtp/h264_rtp_packetizer.*
     rtp/audio_rtp_packetizer.*
     timing/frame_scheduler.*
-    timing/media_time_conversion.*
     timing/session_timeline.*
     stats/publisher_stats.*
 

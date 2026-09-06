@@ -1,3 +1,4 @@
 target_sources(semilive_publisher_core PRIVATE
-    video_placement_calculator.cpp
+    rtp_timestamp.cpp
+    rtp_timestamp.hpp
 )

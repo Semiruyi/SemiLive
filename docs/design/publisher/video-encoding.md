@@ -52,13 +52,14 @@ CapturedVideoFrame（CPU BGRA）
 
 ```text
 FfmpegH264EncoderBackend
-├── VideoPlacementCalculator   纯整数缩放区域计算，不依赖 FFmpeg
+├── model::calculate_video_placement  模型值之间的纯整数缩放区域计算
 ├── SwsFrameConverter          管理 SwsContext 和内部缩放帧
 └── FfmpegH264Encoder          管理 AVCodecContext、send/receive 和 flush
 ```
 
-`VideoPlacement` 是共享模型中的纯值对象；它的领域计算器不依赖基础设施，可以单独测试。其余辅助类
-属于 FFmpeg 实现细节，可以在基础设施测试中分别验证，但不成为 Worker 的注入依赖。
+`VideoDimensions` 到 `VideoPlacement` 的计算属于共享模型值之间不含状态的纯转换，可以单独测试；
+它不依赖领域模块或基础设施。其余辅助类属于 FFmpeg 实现细节，可以在基础设施测试中分别验证，
+但不成为 Worker 的注入依赖。
 `FfmpegH264EncoderBackend` 是唯一实现视频编码 Backend 契约的对象，保证 FFmpeg 帧引用和编码延迟
 完全封装在同一资源所有者中。
 
@@ -108,9 +109,10 @@ Capture、Encode 和后续 Send 已经可以并行。Video Encode Thread 顺序�
 
 ## 3. Backend 契约草案
 
-`VideoDimensions`、`FrameRate`、`CapturedVideoFrame` 和 `EncodedVideoAccessUnit` 属于无行为的
-共享模型；编码配置、启动信息、批次诊断、结构化错误和虚接口属于编码契约。契约只能依赖
-共享模型和标准库，不得依赖领域模块或 FFmpeg 基础设施。
+`VideoDimensions`、`FrameRate`、`CapturedVideoFrame` 和 `EncodedVideoAccessUnit` 属于共享模型
+值类型；模型层只额外提供这些值之间不含状态的校验与纯转换。编码配置、启动信息、批次诊断、
+结构化错误和虚接口属于编码契约。契约只能依赖共享模型和标准库，不得依赖领域模块或 FFmpeg
+基础设施。
 
 ### 3.1 配置与启动信息
 
@@ -270,8 +272,8 @@ Flushed / Failed --close--> Closed
 
 ### 4.2 等比缩放与黑边
 
-领域层的 `VideoPlacementCalculator` 使用整数运算，产生共享模型中的 `VideoPlacement`，表示能够完整
-放入固定画布的最大缩放矩形：
+模型层的 `calculate_video_placement()` 使用整数运算，把 `VideoDimensions` 转换为
+`VideoPlacement`，表示能够完整放入固定画布的最大缩放矩形：
 
 ```cpp
 struct VideoPlacement {
@@ -351,8 +353,14 @@ FFmpeg Buffer 引用计数和生命周期完全留在 Backend 内部。
 每个输入帧使用已有整数函数映射：
 
 ```text
-encoder_pts = media_time_to_clock_ticks(presentation_time, 90000)
+clock_rate = MediaClockRate{90000}
+clock_ticks = media_time_to_clock_ticks(presentation_time, clock_rate)
+encoder_pts = checked_int64(clock_ticks)
 ```
+
+`MediaClockRate` 和 `MediaClockTicks` 是共享模型强类型；模型转换不绑定 FFmpeg，90 kHz 的选择和
+到 `AVFrame::pts` 的有符号整数边界检查仍由 Backend 负责。packet 返回后，Backend 将非负原生
+PTS 恢复成 `MediaClockTicks` 再关联 metadata，不在跨层接口传播裸 tick 整数。
 
 不得把 `captured_at`、Worker 实际开始处理的时刻或连续编码计数当成 PTS。采集帧被 FrameStore
 替换时，后续 PTS 可以存在合法缺口；编码器必须接受严格递增但不要求连续的输入时间戳。
@@ -562,7 +570,7 @@ ffprobe 还原验证。运行 30 分钟确认内存不持续增长，并记录�
 
 ## 11. 实现顺序
 
-1. 实现并测试共享 `VideoPlacement` 与领域 `VideoPlacementCalculator`；
+1. 实现并测试共享 `VideoPlacement` 与模型层纯 placement 转换；
 2. 定义 `VideoEncoderBackend`、Fake Backend 所需契约和错误类型；
 3. 实现并测试 `SwsFrameConverter`；
 4. 扩展 FFmpeg RAII，独立实现并测试纯 codec 的 `FfmpegH264Encoder`；
@@ -576,6 +584,8 @@ ffprobe 还原验证。运行 30 分钟确认内存不持续增长，并记录�
 
 - 后端契约只有一个接收 BGRA、输出 H.264 AU 的 `VideoEncoderBackend`；
 - 编码契约只依赖共享模型和标准库，不依赖领域模块或 FFmpeg 基础设施；
+- `MediaTime`、`MediaClockRate` 和 `MediaClockTicks` 之间的无状态转换属于共享模型，FFmpeg
+  Backend 不依赖领域模块；
 - 不公开 `VideoFrameProcessor`、通用 YUV 中间对象或 FFmpeg 类型；
 - FFmpeg Backend 内部按 placement、swscale 和 codec 职责拆分类与文件；
 - FFmpeg 类型通过前置声明和 RAII 指针留在基础设施内部，Backend 直接组合 helper，不增加 PImpl；

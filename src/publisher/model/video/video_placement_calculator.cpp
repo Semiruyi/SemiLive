@@ -1,8 +1,8 @@
-#include "publisher/domain/video/video_placement_calculator.hpp"
+#include "publisher/model/video/video_placement_calculator.hpp"
 
 #include <cstdint>
 
-namespace semilive::publisher::domain {
+namespace semilive::publisher::model {
 namespace {
 
 constexpr std::uint32_t floor_to_even(const std::uint64_t value) noexcept {
@@ -19,9 +19,9 @@ constexpr std::uint32_t centered_even_offset(
 
 }  // namespace
 
-std::expected<model::VideoPlacement, VideoPlacementError>
-calculate_video_placement(const model::VideoDimensions input,
-                          const model::VideoDimensions output) noexcept {
+std::expected<VideoPlacement, VideoPlacementError>
+calculate_video_placement(const VideoDimensions input,
+                          const VideoDimensions output) noexcept {
     if (input.width == 0 || input.height == 0) {
         return std::unexpected{VideoPlacementError::EmptyInput};
     }
@@ -51,7 +51,7 @@ calculate_video_placement(const model::VideoDimensions input,
         return std::unexpected{VideoPlacementError::ScaledImageTooSmall};
     }
 
-    return model::VideoPlacement{
+    return VideoPlacement{
         centered_even_offset(output.width, scaled_width),
         centered_even_offset(output.height, scaled_height),
         scaled_width,
@@ -59,4 +59,4 @@ calculate_video_placement(const model::VideoDimensions input,
     };
 }
 
-}  // namespace semilive::publisher::domain
+}  // namespace semilive::publisher::model

@@ -213,7 +213,7 @@ ReceiveOneResult receive_one(AVCodecContext& context,
     const auto packet_size =
         static_cast<std::size_t>(receive_packet.size);
     packet.annex_b.resize(packet_size);
-    std::memcpy(packet.annex_b.data(), receive_packet.data, packet_size); // TODO 此处可考虑优化为0拷贝
+    std::memcpy(packet.annex_b.data(), receive_packet.data, packet_size); // TODO 此处可考虑优化为0拷贝，收益较低
     packet.pts = receive_packet.pts;
     packet.key_frame = (receive_packet.flags & AV_PKT_FLAG_KEY) != 0;
     return ReceiveEvent{std::move(packet)};

@@ -1,4 +1,4 @@
-#include "publisher/domain/video/video_placement_calculator.hpp"
+#include "publisher/model/video/video_placement_calculator.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -11,10 +11,10 @@
 
 namespace {
 
-using semilive::publisher::domain::VideoPlacementError;
-using semilive::publisher::domain::calculate_video_placement;
 using semilive::publisher::model::VideoDimensions;
 using semilive::publisher::model::VideoPlacement;
+using semilive::publisher::model::VideoPlacementError;
+using semilive::publisher::model::calculate_video_placement;
 
 void require(const bool condition, const std::string_view message) {
     if (!condition) {

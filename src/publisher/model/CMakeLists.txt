@@ -1,4 +1,6 @@
 target_sources(semilive_publisher_core PRIVATE
+    media_clock.cpp
+    media_clock.hpp
     media_time.hpp
     video/bgra_frame_buffer.hpp
     video/captured_video_frame.hpp
@@ -6,4 +8,6 @@ target_sources(semilive_publisher_core PRIVATE
     video/frame_rate.hpp
     video/video_dimensions.hpp
     video/video_placement.hpp
+    video/video_placement_calculator.cpp
+    video/video_placement_calculator.hpp
 )
