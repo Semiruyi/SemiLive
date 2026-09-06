@@ -36,6 +36,7 @@ struct VideoEncodeBatch {
 };
 
 enum class VideoEncoderOperation : std::uint8_t {
+    State,
     Open,
     ValidateInput,
     CalculatePlacement,

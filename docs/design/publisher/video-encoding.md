@@ -62,6 +62,18 @@ FfmpegH264EncoderBackend
 `FfmpegH264EncoderBackend` 是唯一实现视频编码 Backend 契约的对象，保证 FFmpeg 帧引用和编码延迟
 完全封装在同一资源所有者中。
 
+`FfmpegH264Encoder` 保持纯 codec 边界：它接收已经填充 PTS 的 `AVFrame`，返回包含拥有型字节、
+packet PTS 和关键帧标记的内部 `EncodedPacket`，不接触 `CapturedVideoFrame`、`MediaTime` 或来源
+metadata。`FfmpegH264EncoderBackend` 负责输入校验、placement、颜色转换、PTS 映射、metadata
+关联以及从 `EncodedPacket` 组装 `EncodedVideoAccessUnit`。packet 字节通过移动进入 AU，不增加
+一次码流复制。
+
+FFmpeg 资源类型在基础设施头文件中只以前置声明和带自定义 deleter 的 RAII 指针出现，FFmpeg C
+头文件只由 `.cpp` 包含。`FfmpegH264EncoderBackend` 直接组合 `SwsFrameConverter`、
+`FfmpegH264Encoder` 和最终输入帧，不为 Backend 再增加 PImpl；小型 `AVRational` 等值类型在
+`.cpp` 中按值构造，不为隐藏头文件而进行堆分配。该边界使 FFmpeg include 路径和链接依赖保持
+在基础设施 target 的私有实现中。
+
 ### 2.2 首版线程边界
 
 首版执行拓扑为：
@@ -138,6 +150,12 @@ struct VideoEncoderInfo {
 超过 `maximum_delayed_frames`，违反时返回内部错误；找不到 `libx264` 或实际参数不满足基线时，
 启动失败而不是切换到另一种编码器。
 
+`maximum_delayed_frames` 明确定义为：一次成功的 `encode()` 已经取尽当前可用 packet 后，已被
+codec 接受但尚未产生 packet 的输入帧数量上限。它不是 `AVCodecContext::delay` 的直接转抄。
+首版 `FfmpegH264EncoderBackend` 报告并强制该值为 `1`；每次成功编码返回前若待关联 metadata
+超过一个，视为致命 Backend 错误。这样既保留严格内存和延迟上界，也不依赖 libx264 每次调用
+必然同步一进一出的实现细节。
+
 ### 3.2 编码结果
 
 ```cpp
@@ -156,10 +174,15 @@ struct VideoEncodeBatch {
 耗时。`preprocessing_time` 和 `codec_time` 不进入媒体对象，也不影响时间戳；它们用于判断未来
 是否值得拆分预处理线程。
 
+`preprocessing_time` 覆盖 placement 计算、取得可写输出帧以及颜色转换；`codec_time` 覆盖
+send、receive 和把 packet 复制到拥有型内部 buffer。输入合法性检查、metadata 容器操作和 AU
+对象组装不计入这两个阶段。`flush()` 的 `preprocessing_time` 为零。
+
 ### 3.3 错误与接口
 
 ```cpp
 enum class VideoEncoderOperation {
+    State,
     Open,
     ValidateInput,
     CalculatePlacement,
@@ -204,6 +227,32 @@ public:
 - 配置错误和运行错误都返回结构化 Issue，异常不得越过 Worker 线程入口；
 - Fake Backend 必须能够脚本化零输出、单输出、多输出、延迟输出、flush 输出和失败。
 
+`State` 表示违反 Backend 会话调用顺序，例如重复 `open()`、未打开时 `encode()` 或第二次
+`flush()`。它与输入内容错误区分，具体调用和当前状态写入 `message`，首版不再增加独立的错误
+原因枚举。
+
+### 3.4 Backend 生命周期
+
+真实 Backend 内部维护以下会话状态，不自行加锁；`VideoEncoderWorker` 保证所有方法在同一线程
+串行调用：
+
+```text
+Closed --open 成功--> Open --flush 成功--> Flushed
+                         |
+                    运行期错误
+                         v
+                       Failed
+
+Flushed / Failed --close--> Closed
+```
+
+- `open()` 只接受 `Closed`；启动中任一步骤失败都回滚部分资源并保持 `Closed`，允许重试；
+- 输入校验、转换、codec 或 metadata 关联失败后进入 `Failed`，之后只允许 `close()`；
+- `flush()` 只接受 `Open`，每个会话最多成功一次，成功后进入 `Flushed`；
+- `close()` 幂等且不抛异常，依次关闭 codec、释放最终输入帧、reset converter，再清空 metadata、
+  配置和 PTS 状态；
+- 析构调用同一条 `close()` 清理路径。
+
 ## 4. 图像预处理
 
 ### 4.1 输入校验
@@ -214,7 +263,7 @@ public:
 - `width`、`height` 和 `stride` 非零；
 - `stride >= width * 4`，所有乘法检查溢出；
 - BGRA buffer 至少覆盖 `stride * height` 字节；
-- `presentation_time` 非负且映射后的 90 kHz PTS 严格递增。
+- `presentation_time` 非负，映射后的 90 kHz PTS 可由 `std::int64_t` 表示且严格递增。
 
 无效输入表示上游契约或内部状态被破坏，属于致命编码错误，不能跳过后继续使用可能已经不一致
 的参考链。
@@ -313,6 +362,11 @@ Backend 为已经送入编码器但尚未输出的帧保存：
 ```text
 encoder_pts -> presentation_time, source_sequence, captured_at
 ```
+
+映射使用以 `encoder_pts` 为键的有序容器，而不是假设本次输入必然对应本次输出。Backend 在调用
+codec 前登记当前 metadata，使同步产生的 packet 也能关联；codec 调用一旦失败，会话进入
+`Failed`，不尝试局部回滚已经被接受的输入。每次成功 `encode()` 取尽可用 packet 后，容器大小
+不得超过已报告的 `maximum_delayed_frames == 1`；成功 `flush()` 到达 codec EOF 后容器必须为空。
 
 收到 AVPacket 后使用 packet PTS 找回 metadata，构造 `EncodedVideoAccessUnit`。输出继续保留原始
 纳秒 `presentation_time`，不能把 90 kHz PTS 再换算回纳秒，以免发生第二次舍入。首版无 B 帧，
@@ -501,20 +555,22 @@ Synthetic 或 DXGI Backend
 ```
 
 测试消费者只用于 M1 验证，不进入正式生产数据流。使用 ffprobe/ffplay 检查可解码性、
-1920 x 1080、30 fps、YUV420P、PTS 单调、关键帧间隔与黑边；运行 30 分钟确认内存不持续增长，
-并记录预处理、编码、FrameStore 替换、实际码率和采集到编码延迟。正式的可选
-`H264FileRecorder` 仍在 VideoRtpSenderWorker 阶段接入。
+1920 x 1080、30 fps、YUV420P、关键帧间隔与黑边；AU 消费者在写文件前检查应用层
+`presentation_time` 严格单调，因为原始 Annex-B `.h264` 不携带每个 AU 的应用层 PTS，不能靠
+ffprobe 还原验证。运行 30 分钟确认内存不持续增长，并记录预处理、编码、FrameStore 替换、
+实际码率和采集到编码延迟。正式的可选 `H264FileRecorder` 仍在 VideoRtpSenderWorker 阶段接入。
 
 ## 11. 实现顺序
 
 1. 实现并测试共享 `VideoPlacement` 与领域 `VideoPlacementCalculator`；
 2. 定义 `VideoEncoderBackend`、Fake Backend 所需契约和错误类型；
-3. 实现 `SwsFrameConverter` 与 `FfmpegH264Encoder` 内部组件；
-4. 实现 `FfmpegH264EncoderBackend` 并完成独立 FFmpeg 集成测试；
-5. 实现 `VideoEncoderWorker` 的线程、命令、通知、pending 和两种停止路径；
-6. 接入已有 FrameStore 与 AU Queue，完成 Synthetic 无设备闭环；
-7. 完成真实 DXGI 到 `.h264` 的 M1 验证和性能报告；
-8. 性能数据不足时先优化当前 Backend，只有满足拆线程条件后再写新的设计。
+3. 实现并测试 `SwsFrameConverter`；
+4. 扩展 FFmpeg RAII，独立实现并测试纯 codec 的 `FfmpegH264Encoder`；
+5. 实现 `FfmpegH264EncoderBackend` 的编排、metadata 关联和独立 FFmpeg 集成测试；
+6. 实现 `VideoEncoderWorker` 的线程、命令、通知、pending 和两种停止路径；
+7. 接入已有 FrameStore 与 AU Queue，完成 Synthetic 无设备闭环；
+8. 完成真实 DXGI 到 `.h264` 的 M1 验证和性能报告；
+9. 性能数据不足时先优化当前 Backend，只有满足拆线程条件后再写新的设计。
 
 ## 12. 已决定
 
@@ -522,6 +578,10 @@ Synthetic 或 DXGI Backend
 - 编码契约只依赖共享模型和标准库，不依赖领域模块或 FFmpeg 基础设施；
 - 不公开 `VideoFrameProcessor`、通用 YUV 中间对象或 FFmpeg 类型；
 - FFmpeg Backend 内部按 placement、swscale 和 codec 职责拆分类与文件；
+- FFmpeg 类型通过前置声明和 RAII 指针留在基础设施内部，Backend 直接组合 helper，不增加 PImpl；
+- `FfmpegH264Encoder` 是只接收 `AVFrame`、返回拥有型 packet 的纯 codec helper，不保存领域 metadata；
+- Backend 会话显式区分 `Closed`、`Open`、`Flushed` 和 `Failed`，调用顺序错误使用 `State` issue；
+- 首版 Backend 报告并强制最多保留一个延迟输入，flush 成功后不得残留 metadata；
 - 首版使用一个 Video Encode Worker，允许 libx264 内部并行；
 - 首版固定 YUV420P、BT.709 limited range、1920 x 1080、30 fps、4 Mbps、GOP 60、无 B 帧；
 - 一次输入允许产生零个或多个 AU，normal stop 必须 flush；

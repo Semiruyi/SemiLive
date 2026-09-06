@@ -28,6 +28,7 @@ jobs:
             ninja-build \
             pkg-config \
             libspdlog-dev \
+            libavcodec-dev \
             libavutil-dev \
             libswscale-dev
 

@@ -69,14 +69,14 @@ cmake --build --preset windows-debug
 ctest --preset windows-debug
 ```
 
-Linux 开发环境需要 C++23 编译器、CMake、Ninja、pkg-config、spdlog、libavutil 和
-libswscale：
+Linux 开发环境需要 C++23 编译器、CMake、Ninja、pkg-config、spdlog、libavcodec、
+libavutil 和 libswscale：
 
 ```sh
 sudo apt-get update
 sudo apt-get install --yes \
   g++ cmake ninja-build pkg-config \
-  libspdlog-dev libavutil-dev libswscale-dev
+  libspdlog-dev libavcodec-dev libavutil-dev libswscale-dev
 cmake --preset linux-debug
 cmake --build --preset linux-debug
 ctest --preset linux-debug
