@@ -486,9 +486,9 @@ audio_clock_ticks = round(media_time * audio_clock_rate)
 实现使用 `MediaTime = std::chrono::nanoseconds`，并以 `MediaClockRate` 和 `MediaClockTicks`
 区分时钟频率与 tick 数量。模型层的 `media_time_to_clock_ticks()` 接收这两个模型值，使用整数
 运算按最近 tick 舍入，通过 `expected` 报告无效频率、负媒体时间和宽位结果溢出；不得使用浮点
-换算，也不得提供 tick 到裸整数的隐式转换。RTP 模块的
-`media_clock_ticks_to_rtp_timestamp()` 再将宽位 tick 偏移与随机初始时间戳相加，最终按无符号
-32 位自然回绕；RTP 协议语义不进入通用模型转换。
+换算，也不得提供 tick 到裸整数的隐式转换。RTP 发送阶段再将宽位 tick 偏移与随机初始时间戳
+相加，最终按无符号 32 位自然回绕；具体转换接口随 RTP 发送链路一起设计，RTP 协议语义不进入
+通用模型转换。
 
 视频摘要：
 
@@ -724,7 +724,8 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 - `EncodedVideoAccessUnitQueue` 顺序、满、pending AU、clear 和边界通知；
 - 两个音频队列的容量、不连续传播、过载阈值和 clear 边界通知；
 - FrameScheduler 帧率和 PTS 单调性；
-- SessionTimeline 的共同原点、整数舍入、视频 90 kHz、音频时钟频率和 RTP 回绕换算；
+- MediaClock 的整数舍入、视频 90 kHz、音频时钟频率和错误边界；
+- SessionTimeline 的共同原点和媒体时间单调性；
 - 音频 Sample 位置、块持续时间和时间戳连续性；
 - Annex-B NAL 拆分；
 - RTP Header、序列号、时间戳和 Marker；
@@ -801,6 +802,7 @@ src/publisher/
   contracts/
     capture/desktop_capture_backend.*
     capture/system_audio_capture_backend.*
+    notifier/notifier.hpp
     processing/audio_frame_processor.*
     encoder/video_encoder_backend.*
     encoder/audio_encoder_backend.*
@@ -817,7 +819,6 @@ src/publisher/
     worker/audio_capture/...
     worker/audio_encoder/...
     worker/audio_rtp_sender/...
-    rtp/rtp_timestamp.*
     rtp/h264_nal_splitter.*
     rtp/h264_rtp_packetizer.*
     rtp/audio_rtp_packetizer.*
@@ -826,7 +827,6 @@ src/publisher/
     stats/publisher_stats.*
 
   infrastructure/
-    notifier/notifier.*
     notifier/default_notifier.*
     capture/dxgi_desktop_capture_backend.*
     capture/synthetic_desktop_capture_backend.*
