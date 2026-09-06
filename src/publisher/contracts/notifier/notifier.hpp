@@ -6,7 +6,7 @@
 #include <typeinfo>
 #include <utility>
 
-namespace semilive::publisher::infra {
+namespace semilive::publisher::contracts {
 
 // Type-based synchronous notification contract. Callbacks run on the sender's
 // thread and therefore must only publish lightweight wake-up hints.
@@ -50,8 +50,6 @@ public:
         return send_erased(std::type_index(typeid(Event)), &event);
     }
 
-    [[nodiscard]] virtual bool clear_all() noexcept = 0;
-
 protected:
     Notifier() = default;
 
@@ -61,4 +59,4 @@ protected:
     virtual bool send_erased(std::type_index type, const void* event) = 0;
 };
 
-}  // namespace semilive::publisher::infra
+}  // namespace semilive::publisher::contracts

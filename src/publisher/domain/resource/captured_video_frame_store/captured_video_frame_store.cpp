@@ -8,7 +8,7 @@
 
 namespace semilive::publisher::domain {
 
-CapturedVideoFrameStore::CapturedVideoFrameStore(std::shared_ptr<infra::Notifier> notifier,
+CapturedVideoFrameStore::CapturedVideoFrameStore(std::shared_ptr<contracts::Notifier> notifier,
                                        const std::size_t capacity)
     : notifier_(std::move(notifier)), capacity_(capacity) {
     if (capacity_ == 0) {

@@ -72,7 +72,7 @@ DefaultNotifier::~DefaultNotifier() {
     (void)clear_all();
 }
 
-std::shared_ptr<Notifier::Subscription> DefaultNotifier::subscribe_erased(
+std::shared_ptr<contracts::Notifier::Subscription> DefaultNotifier::subscribe_erased(
     const std::type_index type,
     std::function<void(const void*)> callback) {
     auto slot = std::make_shared<Slot>(std::move(callback));

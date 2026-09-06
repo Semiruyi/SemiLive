@@ -2,7 +2,7 @@
 
 #include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_sink.hpp"
 #include "publisher/domain/worker/video_capture_worker/video_capture_worker.hpp"
-#include "publisher/infrastructure/notifier/notifier.hpp"
+#include "publisher/contracts/notifier/notifier.hpp"
 
 #include <condition_variable>
 #include <cstdint>
@@ -23,7 +23,7 @@ public:
     DefaultVideoCaptureWorker(
         std::unique_ptr<contracts::capture::DesktopCaptureBackend> backend,
         CapturedVideoFrameSink& sink,
-        std::shared_ptr<infra::Notifier> notifier);
+        std::shared_ptr<contracts::Notifier> notifier);
     ~DefaultVideoCaptureWorker() override;
 
     DefaultVideoCaptureWorker(const DefaultVideoCaptureWorker&) = delete;
@@ -125,7 +125,7 @@ private:
 
     std::unique_ptr<contracts::capture::DesktopCaptureBackend> backend_;
     CapturedVideoFrameSink* sink_ = nullptr;
-    std::shared_ptr<infra::Notifier> notifier_;
+    std::shared_ptr<contracts::Notifier> notifier_;
 
     mutable std::mutex mutex_;
     std::condition_variable cv_;

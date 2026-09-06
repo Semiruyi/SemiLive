@@ -100,6 +100,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 后端契约 | [`VideoEncoderBackend`](video-encoding.md) | 接收 BGRA 帧，完成预处理并输出 H.264 AU |
 | 后端契约 | `AudioEncoderBackend` | 接收处理后的 PCM 并输出编码音频包 |
 | 后端契约 | `DatagramSink` | 发送一个完整数据报 |
+| 通知契约 | `Notifier` | 定义按事件类型同步发布、订阅和订阅生命周期 |
 | 基础设施 | `DxgiDesktopCaptureBackend` | D3D11/DXGI Desktop Duplication 实现 |
 | 基础设施 | `SyntheticDesktopCaptureBackend` | 可重复测试画面实现 |
 | 基础设施 | `FfmpegH264EncoderBackend` | 封装 libswscale 与 FFmpeg/libx264 的 H.264 编码实现 |
@@ -109,7 +110,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 基础设施 | `UdpDatagramSink` | Winsock UDP 实现 |
 | 基础设施 | `MemoryDatagramSink` | RTP 单元和集成测试实现 |
 | 基础设施 | `H264FileRecorder` | 通过独立有界队列异步保存可选 Annex-B 诊断输出 |
-| 基础设施 | `DefaultNotifier` | 按事件类型同步发布轻量边界通知 |
+| 基础设施 | `DefaultNotifier` | `Notifier` 的线程安全进程内实现 |
 | 公共基础设施 | `semilive::log` | 进程级异步日志、滚动文件、控制台输出和故障降级 |
 | 可观测性 | `PublisherStats` | 原子计数、耗时累计、峰值和统计快照 |
 | 装配层 | `PublisherComposition` | 管理进程级模块装配、所有权和逆序释放 |
@@ -722,7 +723,6 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 - `CapturedVideoFrameStore` 容量、替换、clear 和 `NotEmpty` 边界通知；
 - `EncodedVideoAccessUnitQueue` 顺序、满、pending AU、clear 和边界通知；
 - 两个音频队列的容量、不连续传播、过载阈值和 clear 边界通知；
-- Notifier 的类型隔离、订阅生命周期和并发分发；
 - FrameScheduler 帧率和 PTS 单调性；
 - SessionTimeline 的共同原点、整数舍入、视频 90 kHz、音频时钟频率和 RTP 回绕换算；
 - 音频 Sample 位置、块持续时间和时间戳连续性；
@@ -733,6 +733,8 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 - VideoCaptureWorker 的启动确认、可停止 deadline 等待、画面复用、恢复超时和重复会话。
 
 ### 13.2 无设备集成测试
+
+基础设施单元测试覆盖 `DefaultNotifier` 的类型隔离、订阅生命周期、回调异常隔离和并发分发。
 
 ```text
 SyntheticDesktopCaptureBackend

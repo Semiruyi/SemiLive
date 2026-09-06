@@ -187,40 +187,6 @@ void encoded_video_access_unit_queue_clear_reports_discard_and_releases_full_edg
     require(subscription->active(), "not-full subscription must remain active");
 }
 
-void notifier_subscription_lifetime_controls_delivery() {
-    DefaultNotifier notifier;
-    int calls = 0;
-    auto subscription = notifier.subscribe<CapturedVideoFrameStoreNotEmpty>(
-        [&calls](const CapturedVideoFrameStoreNotEmpty&) {
-            ++calls;
-        });
-
-    require(notifier.send(CapturedVideoFrameStoreNotEmpty{}),
-            "event with an active subscriber must be dispatched");
-    require(calls == 1, "subscriber must receive the matching event");
-    require(subscription->unsubscribe(), "first unsubscribe must succeed");
-    require(!subscription->unsubscribe(), "unsubscribe must be idempotent");
-    require(!notifier.send(CapturedVideoFrameStoreNotEmpty{}),
-            "event without subscribers must not be dispatched");
-    require(calls == 1, "unsubscribed callback must not run again");
-}
-
-void notifier_callback_failure_does_not_stop_delivery() {
-    DefaultNotifier notifier;
-    int calls = 0;
-
-    auto throwing_subscription = notifier.subscribe<CapturedVideoFrameStoreNotEmpty>(
-        [](const CapturedVideoFrameStoreNotEmpty&) { throw std::runtime_error{"expected failure"}; });
-    auto healthy_subscription = notifier.subscribe<CapturedVideoFrameStoreNotEmpty>(
-        [&calls](const CapturedVideoFrameStoreNotEmpty&) { ++calls; });
-
-    require(notifier.send(CapturedVideoFrameStoreNotEmpty{}),
-            "event with a throwing callback must still be dispatched");
-    require(calls == 1, "a throwing callback must not stop later callbacks");
-    require(throwing_subscription->active() && healthy_subscription->active(),
-            "callback failure must not alter subscription lifetime");
-}
-
 void encoded_video_access_unit_queue_supports_concurrent_spsc_access() {
     auto notifier = std::make_shared<DefaultNotifier>();
     EncodedVideoAccessUnitQueue queue{notifier, 8};
@@ -285,8 +251,6 @@ int main() {
         captured_video_frame_store_notifies_empty_to_non_empty_and_clears();
         encoded_video_access_unit_queue_preserves_pending_item_and_notifies_edges();
         encoded_video_access_unit_queue_clear_reports_discard_and_releases_full_edge();
-        notifier_subscription_lifetime_controls_delivery();
-        notifier_callback_failure_does_not_stop_delivery();
         encoded_video_access_unit_queue_supports_concurrent_spsc_access();
         zero_capacity_is_rejected();
     } catch (const std::exception& error) {

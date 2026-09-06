@@ -91,7 +91,7 @@ bool valid_image_layout(const DesktopImage& image) noexcept {
 DefaultVideoCaptureWorker::DefaultVideoCaptureWorker(
     std::unique_ptr<contracts::capture::DesktopCaptureBackend> backend,
     CapturedVideoFrameSink& sink,
-    std::shared_ptr<infra::Notifier> notifier)
+    std::shared_ptr<contracts::Notifier> notifier)
     : backend_(std::move(backend)), sink_(&sink), notifier_(std::move(notifier)) {
     if (!backend_ || !notifier_) {
         throw std::invalid_argument{"video capture worker dependencies must not be null"};

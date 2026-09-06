@@ -3,7 +3,7 @@
 #include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_sink.hpp"
 #include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_source.hpp"
 #include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_store_control.hpp"
-#include "publisher/infrastructure/notifier/notifier.hpp"
+#include "publisher/contracts/notifier/notifier.hpp"
 
 #include <cstddef>
 #include <deque>
@@ -18,7 +18,7 @@ class CapturedVideoFrameStore final : public CapturedVideoFrameSink,
 public:
     static constexpr std::size_t kDefaultCapacity = 2;
 
-    explicit CapturedVideoFrameStore(std::shared_ptr<infra::Notifier> notifier,
+    explicit CapturedVideoFrameStore(std::shared_ptr<contracts::Notifier> notifier,
                                 std::size_t capacity = kDefaultCapacity);
     ~CapturedVideoFrameStore() override = default;
 
@@ -35,7 +35,7 @@ public:
 private:
     void notify_not_empty() noexcept;
 
-    std::shared_ptr<infra::Notifier> notifier_;
+    std::shared_ptr<contracts::Notifier> notifier_;
     const std::size_t capacity_;
     mutable std::mutex mutex_;
     std::deque<model::CapturedVideoFrame> frames_;

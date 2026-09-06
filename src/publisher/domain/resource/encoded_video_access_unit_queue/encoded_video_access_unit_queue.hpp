@@ -3,7 +3,7 @@
 #include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue_control.hpp"
 #include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_sink.hpp"
 #include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_source.hpp"
-#include "publisher/infrastructure/notifier/notifier.hpp"
+#include "publisher/contracts/notifier/notifier.hpp"
 
 #include <cstddef>
 #include <deque>
@@ -18,7 +18,7 @@ class EncodedVideoAccessUnitQueue final : public EncodedVideoAccessUnitSink,
 public:
     static constexpr std::size_t kDefaultCapacity = 4;
 
-    explicit EncodedVideoAccessUnitQueue(std::shared_ptr<infra::Notifier> notifier,
+    explicit EncodedVideoAccessUnitQueue(std::shared_ptr<contracts::Notifier> notifier,
                                     std::size_t capacity = kDefaultCapacity);
     ~EncodedVideoAccessUnitQueue() override = default;
 
@@ -36,7 +36,7 @@ private:
     void notify_not_empty() noexcept;
     void notify_not_full() noexcept;
 
-    std::shared_ptr<infra::Notifier> notifier_;
+    std::shared_ptr<contracts::Notifier> notifier_;
     const std::size_t capacity_;
     mutable std::mutex mutex_;
     std::deque<model::EncodedVideoAccessUnit> access_units_;

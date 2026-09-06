@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/infrastructure/notifier/notifier.hpp"
+#include "publisher/contracts/notifier/notifier.hpp"
 
 #include <functional>
 #include <memory>
@@ -8,7 +8,7 @@
 
 namespace semilive::publisher::infra {
 
-class DefaultNotifier final : public Notifier {
+class DefaultNotifier final : public contracts::Notifier {
 public:
     DefaultNotifier();
     ~DefaultNotifier() override;
@@ -18,8 +18,6 @@ public:
     DefaultNotifier(DefaultNotifier&&) = delete;
     DefaultNotifier& operator=(DefaultNotifier&&) = delete;
 
-    [[nodiscard]] bool clear_all() noexcept override;
-
 protected:
     std::shared_ptr<Subscription> subscribe_erased(
         std::type_index type,
@@ -27,6 +25,8 @@ protected:
     bool send_erased(std::type_index type, const void* event) override;
 
 private:
+    [[nodiscard]] bool clear_all() noexcept;
+
     struct Slot;
     struct State;
 
