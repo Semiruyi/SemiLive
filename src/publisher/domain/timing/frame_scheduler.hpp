@@ -1,8 +1,8 @@
 #pragma once
 
 #include "publisher/domain/timing/session_timeline.hpp"
-#include "publisher/model/media_time.hpp"
-#include "publisher/model/video/frame_rate.hpp"
+#include <semilive/publisher/model/media_time.hpp>
+#include <semilive/publisher/model/video/frame_rate.hpp>
 
 #include <chrono>
 #include <cstdint>

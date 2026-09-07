@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/model/video/captured_video_frame.hpp"
+#include <semilive/publisher/model/video/captured_video_frame.hpp>
 
 #include <cstdint>
 

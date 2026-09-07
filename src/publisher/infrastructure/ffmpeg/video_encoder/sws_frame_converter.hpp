@@ -2,9 +2,9 @@
 
 #include "publisher/contracts/encoder/video_encoder_backend.hpp"
 #include "publisher/infrastructure/ffmpeg/ffmpeg_raii.hpp"
-#include "publisher/model/video/bgra_frame_buffer.hpp"
-#include "publisher/model/video/video_dimensions.hpp"
-#include "publisher/model/video/video_placement.hpp"
+#include <semilive/publisher/model/video/bgra_frame_buffer.hpp>
+#include <semilive/publisher/model/video/video_dimensions.hpp>
+#include <semilive/publisher/model/video/video_placement.hpp>
 
 #include <expected>
 

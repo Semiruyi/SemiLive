@@ -1,9 +1,9 @@
 #pragma once
 
-#include "publisher/model/video/captured_video_frame.hpp"
-#include "publisher/model/video/encoded_video_access_unit.hpp"
-#include "publisher/model/video/frame_rate.hpp"
-#include "publisher/model/video/video_dimensions.hpp"
+#include <semilive/publisher/model/video/captured_video_frame.hpp>
+#include <semilive/publisher/model/video/encoded_video_access_unit.hpp>
+#include <semilive/publisher/model/video/frame_rate.hpp>
+#include <semilive/publisher/model/video/video_dimensions.hpp>
 
 #include <chrono>
 #include <cstdint>

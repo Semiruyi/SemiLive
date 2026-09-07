@@ -1,7 +1,7 @@
 #pragma once
 
-#include "publisher/model/video/video_dimensions.hpp"
-#include "publisher/model/video/video_placement.hpp"
+#include <semilive/publisher/model/video/video_dimensions.hpp>
+#include <semilive/publisher/model/video/video_placement.hpp>
 
 #include <cstdint>
 #include <expected>

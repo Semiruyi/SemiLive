@@ -1,7 +1,7 @@
 #include "publisher/infrastructure/ffmpeg/video_encoder/ffmpeg_h264_encoder_backend.hpp"
 
-#include "publisher/model/media_clock.hpp"
-#include "publisher/model/video/video_placement_calculator.hpp"
+#include <semilive/publisher/model/media_clock.hpp>
+#include <semilive/publisher/model/video/video_placement_calculator.hpp>
 
 extern "C" {
 #include <libavutil/error.h>

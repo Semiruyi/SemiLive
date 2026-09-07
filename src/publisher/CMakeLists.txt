@@ -11,6 +11,10 @@ add_subdirectory(contracts)
 add_subdirectory(domain)
 add_subdirectory(infrastructure)
 
+target_link_libraries(semilive_publisher_core PUBLIC
+    SemiLive::PublisherModel
+)
+
 semilive_add_app(semilive_publisher main.cpp)
 target_link_libraries(semilive_publisher PRIVATE
     semilive_publisher_core

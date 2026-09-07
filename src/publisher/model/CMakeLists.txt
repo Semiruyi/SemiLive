@@ -1,13 +1,12 @@
-target_sources(semilive_publisher_core PRIVATE
-    media_clock.cpp
-    media_clock.hpp
-    media_time.hpp
-    video/bgra_frame_buffer.hpp
-    video/captured_video_frame.hpp
-    video/encoded_video_access_unit.hpp
-    video/frame_rate.hpp
-    video/video_dimensions.hpp
-    video/video_placement.hpp
-    video/video_placement_calculator.cpp
-    video/video_placement_calculator.hpp
+add_library(semilive_publisher_model STATIC
+    src/media_clock.cpp
+    src/video/video_placement_calculator.cpp
 )
+
+add_library(SemiLive::PublisherModel ALIAS semilive_publisher_model)
+
+target_include_directories(semilive_publisher_model PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_compile_features(semilive_publisher_model PUBLIC cxx_std_23)
+semilive_enable_warnings(semilive_publisher_model)

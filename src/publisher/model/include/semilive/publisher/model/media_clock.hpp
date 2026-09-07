@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/model/media_time.hpp"
+#include <semilive/publisher/model/media_time.hpp>
 
 #include <compare>
 #include <cstdint>

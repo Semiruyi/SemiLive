@@ -4,7 +4,7 @@
 #include "publisher/infrastructure/ffmpeg/ffmpeg_raii.hpp"
 #include "publisher/infrastructure/ffmpeg/video_encoder/ffmpeg_h264_encoder.hpp"
 #include "publisher/infrastructure/ffmpeg/video_encoder/sws_frame_converter.hpp"
-#include "publisher/model/media_clock.hpp"
+#include <semilive/publisher/model/media_clock.hpp>
 
 #include <chrono>
 #include <cstdint>

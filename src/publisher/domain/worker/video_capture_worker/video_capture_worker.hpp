@@ -2,8 +2,8 @@
 
 #include "publisher/contracts/capture/desktop_capture_backend.hpp"
 #include "publisher/domain/timing/frame_scheduler.hpp"
-#include "publisher/model/media_time.hpp"
-#include "publisher/model/video/frame_rate.hpp"
+#include <semilive/publisher/model/media_time.hpp>
+#include <semilive/publisher/model/video/frame_rate.hpp>
 
 #include <chrono>
 #include <cstdint>

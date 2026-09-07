@@ -787,17 +787,22 @@ src/publisher/
     publisher_config.*
 
   model/
-    media_clock.*
-    media_time.hpp
-    video/bgra_frame_buffer.hpp
-    video/captured_video_frame.hpp
-    video/encoded_video_access_unit.hpp
-    video/frame_rate.hpp
-    video/video_dimensions.hpp
-    video/video_placement.hpp
-    video/video_placement_calculator.*
-    audio/captured_audio_block.hpp
-    audio/encoded_audio_packet.hpp
+    CMakeLists.txt
+    include/semilive/publisher/model/
+      media_clock.hpp
+      media_time.hpp
+      video/bgra_frame_buffer.hpp
+      video/captured_video_frame.hpp
+      video/encoded_video_access_unit.hpp
+      video/frame_rate.hpp
+      video/video_dimensions.hpp
+      video/video_placement.hpp
+      video/video_placement_calculator.hpp
+      audio/captured_audio_block.hpp
+      audio/encoded_audio_packet.hpp
+    src/
+      media_clock.cpp
+      video/video_placement_calculator.cpp
 
   contracts/
     capture/desktop_capture_backend.*
@@ -846,12 +851,18 @@ src/publisher/
 ```
 
 测试目录按相同层次镜像组织。实现时允许在不破坏依赖方向的前提下合并过小文件，避免为
-目录结构本身制造样板代码。
+目录结构本身制造样板代码。上图中尚未迁移的模块以逻辑路径简写；拆分为独立 target 时均采用
+与 Model 相同的私有 `src/` 和模块专属 `include/semilive/publisher/...` 结构。
 
-CMake 的部署目标对应三个最终程序。Publisher 额外提供一个不包含 `main.cpp` 的
-`semilive_publisher_core` 静态库，共享模型、契约、领域、应用、基础设施和装配子目录通过 `target_sources`
-向 Core 添加实现；Publisher 程序和相关测试统一链接 Core。内部模块不再继续拆分静态库，
-避免把源码目录边界等同于链接边界。
+CMake 的部署目标对应三个最终程序。Publisher 内部模块使用独立 target 建立编译和链接边界：
+共享模型为静态库，契约为接口库，领域、应用和各基础设施实现分别为静态库。依赖方向固定为
+`contracts -> model`、`domain -> contracts + model`、`infrastructure -> contracts + model`，
+应用装配层负责组合领域与基础设施，反向依赖不允许出现。
+
+每个模块只公开自己的 `include` 根目录，公开头统一使用 `semilive/publisher/...` 路径；任何 target
+不得公开 `${PROJECT_SOURCE_DIR}/src` 来绕过边界。测试只链接被测模块及其声明的依赖，使不合理的
+跨层包含和链接在编译阶段失败。迁移期间允许保留 `semilive_publisher_core` 作为临时聚合目标，
+但新拆出的模块不得再通过 `target_sources` 注入 Core。
 
 ## 15. 已决定与延后决定
 
