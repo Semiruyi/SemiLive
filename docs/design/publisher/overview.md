@@ -805,13 +805,15 @@ src/publisher/
       video/video_placement_calculator.cpp
 
   contracts/
-    capture/desktop_capture_backend.*
-    capture/system_audio_capture_backend.*
-    notifier/notifier.hpp
-    processing/audio_frame_processor.*
-    encoder/video_encoder_backend.*
-    encoder/audio_encoder_backend.*
-    transport/datagram_sink.*
+    CMakeLists.txt
+    include/semilive/publisher/contracts/
+      capture/desktop_capture_backend.hpp
+      capture/system_audio_capture_backend.hpp
+      notifier/notifier.hpp
+      processing/audio_frame_processor.hpp
+      encoder/video_encoder_backend.hpp
+      encoder/audio_encoder_backend.hpp
+      transport/datagram_sink.hpp
 
   domain/
     resource/captured_video_frame_store/...

@@ -5,6 +5,6 @@ target_include_directories(semilive_publisher_test_support PUBLIC
     ${PROJECT_SOURCE_DIR}/tests
 )
 target_link_libraries(semilive_publisher_test_support PUBLIC
-    semilive_publisher_core
+    SemiLive::PublisherContracts
 )
 semilive_enable_warnings(semilive_publisher_test_support)

@@ -1,4 +1,4 @@
-#include "publisher/contracts/encoder/video_encoder_backend.hpp"
+#include <semilive/publisher/contracts/encoder/video_encoder_backend.hpp>
 #include "publisher/support/encoder/scripted_video_encoder_backend.hpp"
 
 #include <chrono>

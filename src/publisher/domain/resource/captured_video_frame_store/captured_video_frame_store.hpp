@@ -3,7 +3,7 @@
 #include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_sink.hpp"
 #include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_source.hpp"
 #include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_store_control.hpp"
-#include "publisher/contracts/notifier/notifier.hpp"
+#include <semilive/publisher/contracts/notifier/notifier.hpp>
 
 #include <cstddef>
 #include <deque>

@@ -3,7 +3,7 @@
 #include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue_control.hpp"
 #include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_sink.hpp"
 #include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_source.hpp"
-#include "publisher/contracts/notifier/notifier.hpp"
+#include <semilive/publisher/contracts/notifier/notifier.hpp>
 
 #include <cstddef>
 #include <deque>

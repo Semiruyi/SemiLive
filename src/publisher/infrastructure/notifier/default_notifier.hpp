@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/contracts/notifier/notifier.hpp"
+#include <semilive/publisher/contracts/notifier/notifier.hpp>
 
 #include <functional>
 #include <memory>

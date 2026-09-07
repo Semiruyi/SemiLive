@@ -13,6 +13,7 @@ add_subdirectory(infrastructure)
 
 target_link_libraries(semilive_publisher_core PUBLIC
     SemiLive::PublisherModel
+    SemiLive::PublisherContracts
 )
 
 semilive_add_app(semilive_publisher main.cpp)

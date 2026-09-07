@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/contracts/capture/desktop_capture_backend.hpp"
+#include <semilive/publisher/contracts/capture/desktop_capture_backend.hpp>
 
 #include <memory>
 

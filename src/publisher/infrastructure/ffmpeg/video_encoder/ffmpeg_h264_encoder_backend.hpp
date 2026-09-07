@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/contracts/encoder/video_encoder_backend.hpp"
+#include <semilive/publisher/contracts/encoder/video_encoder_backend.hpp>
 #include "publisher/infrastructure/ffmpeg/ffmpeg_raii.hpp"
 #include "publisher/infrastructure/ffmpeg/video_encoder/ffmpeg_h264_encoder.hpp"
 #include "publisher/infrastructure/ffmpeg/video_encoder/sws_frame_converter.hpp"

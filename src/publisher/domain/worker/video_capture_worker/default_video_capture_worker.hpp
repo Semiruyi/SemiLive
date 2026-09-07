@@ -2,7 +2,7 @@
 
 #include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_sink.hpp"
 #include "publisher/domain/worker/video_capture_worker/video_capture_worker.hpp"
-#include "publisher/contracts/notifier/notifier.hpp"
+#include <semilive/publisher/contracts/notifier/notifier.hpp>
 
 #include <condition_variable>
 #include <cstdint>

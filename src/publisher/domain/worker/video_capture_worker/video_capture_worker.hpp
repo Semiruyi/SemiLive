@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/contracts/capture/desktop_capture_backend.hpp"
+#include <semilive/publisher/contracts/capture/desktop_capture_backend.hpp>
 #include "publisher/domain/timing/frame_scheduler.hpp"
 #include <semilive/publisher/model/media_time.hpp>
 #include <semilive/publisher/model/video/frame_rate.hpp>

@@ -1,4 +1,4 @@
-#include "publisher/contracts/capture/desktop_capture_backend.hpp"
+#include <semilive/publisher/contracts/capture/desktop_capture_backend.hpp>
 #include "publisher/infrastructure/capture/dxgi_desktop_capture_backend.hpp"
 
 #include <cstdlib>
