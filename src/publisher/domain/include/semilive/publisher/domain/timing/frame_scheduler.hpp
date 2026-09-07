@@ -1,6 +1,6 @@
 #pragma once
 
-#include "publisher/domain/timing/session_timeline.hpp"
+#include <semilive/publisher/domain/timing/session_timeline.hpp>
 #include <semilive/publisher/model/media_time.hpp>
 #include <semilive/publisher/model/video/frame_rate.hpp>
 

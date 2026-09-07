@@ -1,6 +1,6 @@
-#include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue.hpp"
+#include <semilive/publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue.hpp>
 
-#include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue_events.hpp"
+#include <semilive/publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue_events.hpp>
 
 #include <algorithm>
 #include <stdexcept>

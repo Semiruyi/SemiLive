@@ -7,6 +7,7 @@
 #endif
 #include <d3d11.h>
 #include <dxgi1_2.h>
+#include <objbase.h>
 #include <windows.h>
 #include <wrl/client.h>
 
@@ -371,6 +372,27 @@ std::expected<DesktopPointerShapeType, DesktopCaptureIssue> pointer_shape_type(
 }  // namespace
 
 struct DxgiDesktopCaptureBackend::Impl {
+    [[nodiscard]] std::expected<void, DesktopCaptureIssue> initialize_apartment() {
+        const auto result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        if (FAILED(result)) {
+            return std::unexpected{
+                make_issue(DesktopCaptureOperation::Open,
+                           result,
+                           "failed to initialize the DXGI capture COM apartment")};
+        }
+        apartment_initialized = true;
+        owner_thread = std::this_thread::get_id();
+        return {};
+    }
+
+    void release_apartment() noexcept {
+        if (apartment_initialized && owner_thread == std::this_thread::get_id()) {
+            CoUninitialize();
+        }
+        apartment_initialized = false;
+        owner_thread = {};
+    }
+
     [[nodiscard]] std::expected<void, DesktopCaptureIssue> initialize(
         OutputCandidate candidate,
         const DesktopCaptureOperation operation) {
@@ -567,6 +589,7 @@ struct DxgiDesktopCaptureBackend::Impl {
     bool pointer_visible = false;
     bool open = false;
     bool needs_reinitialize = false;
+    bool apartment_initialized = false;
 };
 
 DxgiDesktopCaptureBackend::DxgiDesktopCaptureBackend()
@@ -591,8 +614,14 @@ DxgiDesktopCaptureBackend::open(
                        "desktop output selection is invalid")};
     }
 
+    const auto apartment_result = impl_->initialize_apartment();
+    if (!apartment_result) {
+        return std::unexpected{apartment_result.error()};
+    }
+
     auto candidate = select_output(config.output, DesktopCaptureOperation::Open);
     if (!candidate) {
+        impl_->release_apartment();
         return std::unexpected{candidate.error()};
     }
 
@@ -604,6 +633,7 @@ DxgiDesktopCaptureBackend::open(
     if (!initialize_result) {
         impl_->release_capture_resources();
         impl_->compose_pointer = false;
+        impl_->release_apartment();
         return std::unexpected{initialize_result.error()};
     }
 
@@ -613,7 +643,6 @@ DxgiDesktopCaptureBackend::open(
         rotation == DXGI_MODE_ROTATION_ROTATE90 ||
         rotation == DXGI_MODE_ROTATION_ROTATE270;
     impl_->output_device_name = output_device_name;
-    impl_->owner_thread = std::this_thread::get_id();
     impl_->open = true;
     return DesktopCaptureInfo{
         output_name,
@@ -766,10 +795,10 @@ DesktopCaptureResult DxgiDesktopCaptureBackend::capture_latest() {
 void DxgiDesktopCaptureBackend::close() noexcept {
     impl_->release_capture_resources();
     impl_->output_device_name.clear();
-    impl_->owner_thread = {};
     impl_->compose_pointer = false;
     impl_->open = false;
     impl_->needs_reinitialize = false;
+    impl_->release_apartment();
 }
 
 }  // namespace semilive::publisher::infra::capture

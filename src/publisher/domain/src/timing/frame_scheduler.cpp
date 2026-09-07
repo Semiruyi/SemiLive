@@ -1,4 +1,4 @@
-#include "publisher/domain/timing/frame_scheduler.hpp"
+#include <semilive/publisher/domain/timing/frame_scheduler.hpp>
 
 #include <limits>
 #include <stdexcept>

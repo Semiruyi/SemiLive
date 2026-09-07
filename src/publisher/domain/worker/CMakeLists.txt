@@ -1,1 +1,0 @@
-add_subdirectory(video_capture_worker)

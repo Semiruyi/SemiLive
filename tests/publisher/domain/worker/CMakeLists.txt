@@ -2,7 +2,8 @@ add_executable(semilive_publisher_video_capture_worker_test
     video_capture_worker_test.cpp
 )
 target_link_libraries(semilive_publisher_video_capture_worker_test PRIVATE
-    semilive_publisher_core
+    SemiLive::PublisherDomain
+    semilive_publisher_test_support
 )
 semilive_enable_warnings(semilive_publisher_video_capture_worker_test)
 

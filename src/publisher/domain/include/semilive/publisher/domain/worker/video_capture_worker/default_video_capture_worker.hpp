@@ -1,7 +1,7 @@
 #pragma once
 
-#include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_sink.hpp"
-#include "publisher/domain/worker/video_capture_worker/video_capture_worker.hpp"
+#include <semilive/publisher/domain/resource/captured_video_frame_store/captured_video_frame_sink.hpp>
+#include <semilive/publisher/domain/worker/video_capture_worker/video_capture_worker.hpp>
 #include <semilive/publisher/contracts/notifier/notifier.hpp>
 
 #include <condition_variable>

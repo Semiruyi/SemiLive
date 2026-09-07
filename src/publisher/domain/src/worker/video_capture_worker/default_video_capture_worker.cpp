@@ -1,6 +1,6 @@
-#include "publisher/domain/worker/video_capture_worker/default_video_capture_worker.hpp"
+#include <semilive/publisher/domain/worker/video_capture_worker/default_video_capture_worker.hpp>
 
-#include "publisher/domain/worker/video_capture_worker/video_capture_worker_events.hpp"
+#include <semilive/publisher/domain/worker/video_capture_worker/video_capture_worker_events.hpp>
 
 #include <algorithm>
 #include <exception>
@@ -10,10 +10,6 @@
 #include <thread>
 #include <type_traits>
 #include <utility>
-
-#ifdef _WIN32
-#include <objbase.h>
-#endif
 
 namespace semilive::publisher::domain {
 namespace {
@@ -49,31 +45,6 @@ void complete(std::promise<void>& promise) noexcept {
     } catch (...) {
     }
 }
-
-class ThreadApartment final {
-public:
-    [[nodiscard]] std::optional<std::int64_t> initialize() noexcept {
-#ifdef _WIN32
-        const HRESULT result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        if (FAILED(result)) {
-            return static_cast<std::int64_t>(result);
-        }
-        initialized_ = true;
-#endif
-        return std::nullopt;
-    }
-
-    ~ThreadApartment() {
-#ifdef _WIN32
-        if (initialized_) {
-            CoUninitialize();
-        }
-#endif
-    }
-
-private:
-    bool initialized_ = false;
-};
 
 bool valid_image_layout(const DesktopImage& image) noexcept {
     if (image.width == 0 || image.height == 0 ||
@@ -166,13 +137,6 @@ VideoCaptureWorkerStats DefaultVideoCaptureWorker::stats() const noexcept {
 }
 
 void DefaultVideoCaptureWorker::worker_main(const std::stop_token stop_token) noexcept {
-    ThreadApartment apartment;
-    if (const auto error = apartment.initialize()) {
-        mark_module_stopped("failed to initialize capture thread COM apartment: " +
-                            std::to_string(*error));
-        return;
-    }
-
     mark_module_alive();
     try {
         worker_loop(stop_token);

@@ -1,8 +1,8 @@
-#include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_store.hpp"
-#include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_store_events.hpp"
-#include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue.hpp"
-#include "publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue_events.hpp"
-#include "publisher/infrastructure/notifier/default_notifier.hpp"
+#include <semilive/publisher/domain/resource/captured_video_frame_store/captured_video_frame_store.hpp>
+#include <semilive/publisher/domain/resource/captured_video_frame_store/captured_video_frame_store_events.hpp>
+#include <semilive/publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue.hpp>
+#include <semilive/publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue_events.hpp>
+#include "publisher/support/notifier/synchronous_notifier.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -27,7 +27,7 @@ using semilive::publisher::domain::EncodedVideoAccessUnitPushResult;
 using semilive::publisher::domain::EncodedVideoAccessUnitQueue;
 using semilive::publisher::domain::EncodedVideoAccessUnitQueueNotEmpty;
 using semilive::publisher::domain::EncodedVideoAccessUnitQueueNotFull;
-using semilive::publisher::infra::DefaultNotifier;
+using semilive::publisher::test_support::SynchronousNotifier;
 using semilive::publisher::model::BgraFrameBuffer;
 using semilive::publisher::model::CapturedVideoFrame;
 using semilive::publisher::model::EncodedVideoAccessUnit;
@@ -61,7 +61,7 @@ EncodedVideoAccessUnit access_unit(const std::uint64_t sequence) {
 }
 
 void captured_video_frame_store_replaces_oldest() {
-    auto notifier = std::make_shared<DefaultNotifier>();
+    auto notifier = std::make_shared<SynchronousNotifier>();
     CapturedVideoFrameStore store{notifier, 2};
     auto first = frame(1);
     auto second = frame(2);
@@ -88,7 +88,7 @@ void captured_video_frame_store_replaces_oldest() {
 }
 
 void captured_video_frame_store_notifies_empty_to_non_empty_and_clears() {
-    auto notifier = std::make_shared<DefaultNotifier>();
+    auto notifier = std::make_shared<SynchronousNotifier>();
     CapturedVideoFrameStore store{notifier, 2};
     int not_empty_count = 0;
     auto subscription = notifier->subscribe<CapturedVideoFrameStoreNotEmpty>(
@@ -115,7 +115,7 @@ void captured_video_frame_store_notifies_empty_to_non_empty_and_clears() {
 }
 
 void encoded_video_access_unit_queue_preserves_pending_item_and_notifies_edges() {
-    auto notifier = std::make_shared<DefaultNotifier>();
+    auto notifier = std::make_shared<SynchronousNotifier>();
     EncodedVideoAccessUnitQueue queue{notifier, 2};
     int not_empty_count = 0;
     int not_full_count = 0;
@@ -166,7 +166,7 @@ void encoded_video_access_unit_queue_preserves_pending_item_and_notifies_edges()
 }
 
 void encoded_video_access_unit_queue_clear_reports_discard_and_releases_full_edge() {
-    auto notifier = std::make_shared<DefaultNotifier>();
+    auto notifier = std::make_shared<SynchronousNotifier>();
     EncodedVideoAccessUnitQueue queue{notifier, 2};
     int not_full_count = 0;
     auto subscription = notifier->subscribe<EncodedVideoAccessUnitQueueNotFull>(
@@ -188,7 +188,7 @@ void encoded_video_access_unit_queue_clear_reports_discard_and_releases_full_edg
 }
 
 void encoded_video_access_unit_queue_supports_concurrent_spsc_access() {
-    auto notifier = std::make_shared<DefaultNotifier>();
+    auto notifier = std::make_shared<SynchronousNotifier>();
     EncodedVideoAccessUnitQueue queue{notifier, 8};
     constexpr std::uint64_t kItemCount = 10'000;
     std::atomic_bool order_is_valid{true};
@@ -225,7 +225,7 @@ void encoded_video_access_unit_queue_supports_concurrent_spsc_access() {
 }
 
 void zero_capacity_is_rejected() {
-    auto notifier = std::make_shared<DefaultNotifier>();
+    auto notifier = std::make_shared<SynchronousNotifier>();
     bool frame_store_rejected = false;
     try {
         [[maybe_unused]] CapturedVideoFrameStore store{notifier, 0};

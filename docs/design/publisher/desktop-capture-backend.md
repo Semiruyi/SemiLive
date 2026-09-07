@@ -169,8 +169,9 @@ protected:
 - 后端不要求支持并发调用，也不在内部创建线程；
 - `DesktopCaptureInfo` 只用于启动确认、日志和统计标签，不替代每张图像携带的实际尺寸。
 
-COM 与 D3D11 初始化和释放都发生在 Video Capture Thread。Worker 在线程入口初始化 COM，
-线程退出前先关闭后端，再释放 COM；后端不得把有线程亲和性的对象交给其他模块。
+COM 与 D3D11 初始化和释放都发生在 Video Capture Thread。DXGI Backend 在 `open()` 中初始化
+COM apartment，并在同一线程调用的 `close()` 中先释放采集资源、再释放 COM；后端不得把有
+线程亲和性的对象交给其他模块。
 
 ## 4. DXGI 实现
 

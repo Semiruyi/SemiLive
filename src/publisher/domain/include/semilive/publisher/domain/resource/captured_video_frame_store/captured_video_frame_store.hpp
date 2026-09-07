@@ -1,8 +1,8 @@
 #pragma once
 
-#include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_sink.hpp"
-#include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_source.hpp"
-#include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_store_control.hpp"
+#include <semilive/publisher/domain/resource/captured_video_frame_store/captured_video_frame_sink.hpp>
+#include <semilive/publisher/domain/resource/captured_video_frame_store/captured_video_frame_source.hpp>
+#include <semilive/publisher/domain/resource/captured_video_frame_store/captured_video_frame_store_control.hpp>
 #include <semilive/publisher/contracts/notifier/notifier.hpp>
 
 #include <cstddef>

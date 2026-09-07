@@ -1,6 +1,6 @@
-#include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_store.hpp"
+#include <semilive/publisher/domain/resource/captured_video_frame_store/captured_video_frame_store.hpp>
 
-#include "publisher/domain/resource/captured_video_frame_store/captured_video_frame_store_events.hpp"
+#include <semilive/publisher/domain/resource/captured_video_frame_store/captured_video_frame_store_events.hpp>
 
 #include <algorithm>
 #include <stdexcept>

@@ -10,5 +10,6 @@ if(WIN32)
     target_link_libraries(semilive_publisher_core PRIVATE
         d3d11
         dxgi
+        ole32
     )
 endif()

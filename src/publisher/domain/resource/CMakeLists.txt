@@ -1,2 +1,0 @@
-add_subdirectory(captured_video_frame_store)
-add_subdirectory(encoded_video_access_unit_queue)
