@@ -30,6 +30,7 @@ if(WIN32)
     )
     target_link_libraries(semilive_publisher_dxgi_capture_test PRIVATE
         semilive_publisher_core
+        SemiLive::PublisherInfraNotifier
     )
     semilive_enable_warnings(semilive_publisher_dxgi_capture_test)
 

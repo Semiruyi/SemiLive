@@ -16,9 +16,8 @@ target_link_libraries(semilive_publisher_core PUBLIC
     SemiLive::PublisherDomain
 )
 target_link_libraries(semilive_publisher_core PRIVATE
-    SemiLive::CommonLog
+    SemiLive::PublisherInfrastructure
 )
-
 semilive_add_app(semilive_publisher main.cpp)
 target_link_libraries(semilive_publisher PRIVATE
     semilive_publisher_core

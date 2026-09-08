@@ -3,7 +3,7 @@
 #include <semilive/publisher/domain/worker/video_capture_worker/default_video_capture_worker.hpp>
 #include <semilive/publisher/model/video/frame_rate.hpp>
 #include "publisher/infrastructure/capture/dxgi_desktop_capture_backend.hpp"
-#include "publisher/infrastructure/notifier/default_notifier.hpp"
+#include <semilive/publisher/infrastructure/notifier/default_notifier.hpp>
 
 #include <chrono>
 #include <cstdlib>

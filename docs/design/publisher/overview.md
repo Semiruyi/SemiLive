@@ -840,7 +840,10 @@ src/publisher/
       stats/...
 
   infrastructure/
-    notifier/default_notifier.*
+    notifier/
+      CMakeLists.txt
+      include/semilive/publisher/infrastructure/notifier/default_notifier.hpp
+      src/default_notifier.cpp
     capture/dxgi_desktop_capture_backend.*
     capture/synthetic_desktop_capture_backend.*
     capture/wasapi_loopback_capture_backend.*
@@ -869,6 +872,10 @@ CMake 的部署目标对应三个最终程序。Publisher 内部模块使用独�
 
 进程级日志实现为独立静态库 `SemiLive::CommonLog`，不依赖任何 Publisher target。Main 和需要
 记录日志的基础设施实现分别显式链接它；日志实现不得通过 `target_sources` 注入其他静态库。
+
+`SemiLive::PublisherInfrastructure` 是仅供 Core 或 Composition 整体装配使用的接口聚合目标，
+其下链接各个独立的基础设施静态库。单元测试和普通模块仍须链接具体基础设施目标，不能借助
+聚合目标扩大可见依赖；迁移期间已拆出的实现逐项加入该目标。
 
 每个模块只公开自己的 `include` 根目录，公开头统一使用 `semilive/publisher/...` 路径；任何 target
 不得公开 `${PROJECT_SOURCE_DIR}/src` 来绕过边界。测试只链接被测模块及其声明的依赖，使不合理的
