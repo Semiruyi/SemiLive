@@ -2,7 +2,7 @@ add_executable(semilive_publisher_synthetic_capture_test
     synthetic_desktop_capture_backend_test.cpp
 )
 target_link_libraries(semilive_publisher_synthetic_capture_test PRIVATE
-    semilive_publisher_core
+    SemiLive::PublisherInfraCapture
 )
 semilive_enable_warnings(semilive_publisher_synthetic_capture_test)
 
@@ -15,7 +15,10 @@ add_executable(semilive_publisher_desktop_pointer_compositor_test
     desktop_pointer_compositor_test.cpp
 )
 target_link_libraries(semilive_publisher_desktop_pointer_compositor_test PRIVATE
-    semilive_publisher_core
+    SemiLive::PublisherInfraCapture
+)
+target_include_directories(semilive_publisher_desktop_pointer_compositor_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/publisher/infrastructure/capture/src
 )
 semilive_enable_warnings(semilive_publisher_desktop_pointer_compositor_test)
 
@@ -29,7 +32,8 @@ if(WIN32)
         dxgi_desktop_capture_backend_test.cpp
     )
     target_link_libraries(semilive_publisher_dxgi_capture_test PRIVATE
-        semilive_publisher_core
+        SemiLive::PublisherDomain
+        SemiLive::PublisherInfraCapture
         SemiLive::PublisherInfraNotifier
     )
     semilive_enable_warnings(semilive_publisher_dxgi_capture_test)

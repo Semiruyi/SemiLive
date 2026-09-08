@@ -1,6 +1,6 @@
-#include "publisher/infrastructure/capture/dxgi_desktop_capture_backend.hpp"
+#include <semilive/publisher/infrastructure/capture/dxgi_desktop_capture_backend.hpp>
 
-#include "publisher/infrastructure/capture/desktop_pointer_compositor.hpp"
+#include "desktop_pointer_compositor.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX

@@ -844,10 +844,19 @@ src/publisher/
       CMakeLists.txt
       include/semilive/publisher/infrastructure/notifier/default_notifier.hpp
       src/default_notifier.cpp
-    capture/dxgi_desktop_capture_backend.*
-    capture/synthetic_desktop_capture_backend.*
-    capture/wasapi_loopback_capture_backend.*
-    capture/synthetic_system_audio_capture_backend.*
+    capture/
+      CMakeLists.txt
+      include/semilive/publisher/infrastructure/capture/
+        dxgi_desktop_capture_backend.hpp
+        synthetic_desktop_capture_backend.hpp
+        wasapi_loopback_capture_backend.hpp
+        synthetic_system_audio_capture_backend.hpp
+      src/
+        desktop_pointer_compositor.*
+        dxgi_desktop_capture_backend.cpp
+        synthetic_desktop_capture_backend.cpp
+        wasapi_loopback_capture_backend.cpp
+        synthetic_system_audio_capture_backend.cpp
     ffmpeg/ffmpeg_h264_encoder_backend.*
     ffmpeg/swr_audio_frame_processor.*
     ffmpeg/ffmpeg_audio_encoder_backend.*

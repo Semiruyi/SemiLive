@@ -1,5 +1,5 @@
 #include <semilive/publisher/contracts/capture/desktop_capture_backend.hpp>
-#include "publisher/infrastructure/capture/synthetic_desktop_capture_backend.hpp"
+#include <semilive/publisher/infrastructure/capture/synthetic_desktop_capture_backend.hpp>
 
 #include <cstddef>
 #include <cstdint>

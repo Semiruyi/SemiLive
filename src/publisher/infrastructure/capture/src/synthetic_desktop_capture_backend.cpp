@@ -1,4 +1,4 @@
-#include "publisher/infrastructure/capture/synthetic_desktop_capture_backend.hpp"
+#include <semilive/publisher/infrastructure/capture/synthetic_desktop_capture_backend.hpp>
 
 #include <limits>
 #include <stdexcept>

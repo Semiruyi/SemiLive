@@ -1,4 +1,4 @@
-#include "publisher/infrastructure/capture/desktop_pointer_compositor.hpp"
+#include "desktop_pointer_compositor.hpp"
 
 #include <algorithm>
 #include <cstddef>
