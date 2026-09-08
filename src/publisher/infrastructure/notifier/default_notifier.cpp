@@ -1,6 +1,6 @@
 #include "publisher/infrastructure/notifier/default_notifier.hpp"
 
-#include "common/infrastructure/log/log.hpp"
+#include <semilive/common/log/log.hpp>
 
 #include <algorithm>
 #include <atomic>

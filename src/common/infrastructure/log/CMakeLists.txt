@@ -1,10 +1,16 @@
-function(semilive_target_add_logging target)
-    find_package(spdlog CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 
-    target_sources(${target} PRIVATE
-        ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/log.cpp
-    )
-    target_link_libraries(${target} PUBLIC
-        spdlog::spdlog
-    )
-endfunction()
+add_library(semilive_common_log STATIC
+    src/log.cpp
+)
+
+add_library(SemiLive::CommonLog ALIAS semilive_common_log)
+
+target_include_directories(semilive_common_log PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_compile_features(semilive_common_log PUBLIC cxx_std_23)
+target_link_libraries(semilive_common_log PUBLIC
+    spdlog::spdlog
+)
+semilive_enable_warnings(semilive_common_log)

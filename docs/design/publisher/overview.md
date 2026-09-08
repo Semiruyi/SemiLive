@@ -867,6 +867,9 @@ CMake 的部署目标对应三个最终程序。Publisher 内部模块使用独�
 `contracts -> model`、`domain -> contracts + model`、`infrastructure -> contracts + model`，
 应用装配层负责组合领域与基础设施，反向依赖不允许出现。
 
+进程级日志实现为独立静态库 `SemiLive::CommonLog`，不依赖任何 Publisher target。Main 和需要
+记录日志的基础设施实现分别显式链接它；日志实现不得通过 `target_sources` 注入其他静态库。
+
 每个模块只公开自己的 `include` 根目录，公开头统一使用 `semilive/publisher/...` 路径；任何 target
 不得公开 `${PROJECT_SOURCE_DIR}/src` 来绕过边界。测试只链接被测模块及其声明的依赖，使不合理的
 跨层包含和链接在编译阶段失败。迁移期间允许保留 `semilive_publisher_core` 作为临时聚合目标，

@@ -1,4 +1,4 @@
-#include "common/infrastructure/log/log.hpp"
+#include <semilive/common/log/log.hpp>
 
 #include <cstdlib>
 #include <iostream>
