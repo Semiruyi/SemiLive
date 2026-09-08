@@ -857,9 +857,17 @@ src/publisher/
         synthetic_desktop_capture_backend.cpp
         wasapi_loopback_capture_backend.cpp
         synthetic_system_audio_capture_backend.cpp
-    ffmpeg/ffmpeg_h264_encoder_backend.*
-    ffmpeg/swr_audio_frame_processor.*
-    ffmpeg/ffmpeg_audio_encoder_backend.*
+    ffmpeg/
+      CMakeLists.txt
+      include/semilive/publisher/infrastructure/ffmpeg/
+        video_encoder/ffmpeg_h264_encoder_backend.hpp
+        audio_processor/swr_audio_frame_processor.hpp
+        audio_encoder/ffmpeg_audio_encoder_backend.hpp
+      src/
+        ffmpeg_raii.*
+        video_encoder/...
+        audio_processor/...
+        audio_encoder/...
     transport/udp_datagram_sink.*
     transport/memory_datagram_sink.*
     output/h264_file_recorder.*
@@ -888,8 +896,8 @@ CMake 的部署目标对应三个最终程序。Publisher 内部模块使用独�
 
 每个模块只公开自己的 `include` 根目录，公开头统一使用 `semilive/publisher/...` 路径；任何 target
 不得公开 `${PROJECT_SOURCE_DIR}/src` 来绕过边界。测试只链接被测模块及其声明的依赖，使不合理的
-跨层包含和链接在编译阶段失败。迁移期间允许保留 `semilive_publisher_core` 作为临时聚合目标，
-但新拆出的模块不得再通过 `target_sources` 注入 Core。
+跨层包含和链接在编译阶段失败。`SemiLive::PublisherCore` 只作为部署程序使用的 INTERFACE 聚合
+目标，不拥有源码或 include 根；独立模块不得通过 `target_sources` 向 Core 注入实现。
 
 ## 15. 已决定与延后决定
 

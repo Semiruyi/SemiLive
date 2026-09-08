@@ -1,7 +1,11 @@
-#include "publisher/infrastructure/ffmpeg/video_encoder/ffmpeg_h264_encoder_backend.hpp"
+#include <semilive/publisher/infrastructure/ffmpeg/video_encoder/ffmpeg_h264_encoder_backend.hpp>
 
 #include <semilive/publisher/model/media_clock.hpp>
 #include <semilive/publisher/model/video/video_placement_calculator.hpp>
+
+#include "ffmpeg_raii.hpp"
+#include "video_encoder/ffmpeg_h264_encoder.hpp"
+#include "video_encoder/sws_frame_converter.hpp"
 
 extern "C" {
 #include <libavutil/error.h>
@@ -10,14 +14,19 @@ extern "C" {
 }
 
 #include <cerrno>
+#include <chrono>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <limits>
+#include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace semilive::publisher::infra::ffmpeg {
 namespace {
@@ -150,11 +159,48 @@ std::expected<AvFramePtr, VideoEncoderIssue> allocate_encoder_frame(
 
 }  // namespace
 
-FfmpegH264EncoderBackend::~FfmpegH264EncoderBackend() {
-    close();
-}
+struct FfmpegH264EncoderBackend::Impl {
+    enum class State : std::uint8_t {
+        Closed,
+        Open,
+        Flushed,
+        Failed,
+    };
 
-contracts::encoder::VideoEncoderOpenResult FfmpegH264EncoderBackend::open(
+    struct FrameMetadata {
+        model::MediaTime presentation_time{};
+        std::uint64_t source_sequence = 0;
+        std::chrono::steady_clock::time_point captured_at{};
+    };
+
+    using AccessUnitResult =
+        std::expected<std::vector<model::EncodedVideoAccessUnit>,
+                      contracts::encoder::VideoEncoderIssue>;
+
+    [[nodiscard]] contracts::encoder::VideoEncoderOpenResult open(
+        const contracts::encoder::VideoEncoderConfig& config);
+    [[nodiscard]] contracts::encoder::VideoEncodeResult encode(
+        const model::CapturedVideoFrame& frame);
+    [[nodiscard]] contracts::encoder::VideoEncodeResult flush();
+    void close() noexcept;
+
+    [[nodiscard]] AccessUnitResult make_access_units(
+        std::vector<FfmpegEncodedPacket> packets);
+    [[nodiscard]] contracts::encoder::VideoEncodeResult fail(
+        contracts::encoder::VideoEncoderIssue issue);
+
+    SwsFrameConverter converter_;
+    FfmpegH264Encoder encoder_;
+    AvFramePtr encoder_frame_;
+    model::VideoDimensions output_{};
+    std::uint32_t maximum_delayed_frames_ = 0;
+    std::map<model::MediaClockTicks, FrameMetadata> metadata_by_pts_;
+    std::optional<model::MediaClockTicks> last_submitted_ticks_;
+    std::optional<model::MediaClockTicks> last_emitted_ticks_;
+    State state_ = State::Closed;
+};
+
+contracts::encoder::VideoEncoderOpenResult FfmpegH264EncoderBackend::Impl::open(
     const contracts::encoder::VideoEncoderConfig& config) {
     if (state_ != State::Closed) {
         return std::unexpected{issue(
@@ -193,7 +239,7 @@ contracts::encoder::VideoEncoderOpenResult FfmpegH264EncoderBackend::open(
     return opened;
 }
 
-contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::encode(
+contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::Impl::encode(
     const model::CapturedVideoFrame& frame) {
     if (state_ != State::Open) {
         return std::unexpected{issue(
@@ -261,7 +307,7 @@ contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::encode(
     return batch;
 }
 
-contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::flush() {
+contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::Impl::flush() {
     if (state_ != State::Open) {
         return std::unexpected{issue(
             VideoEncoderOperation::State, 0,
@@ -293,8 +339,8 @@ contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::flush() {
     return batch;
 }
 
-FfmpegH264EncoderBackend::AccessUnitResult
-FfmpegH264EncoderBackend::make_access_units(
+FfmpegH264EncoderBackend::Impl::AccessUnitResult
+FfmpegH264EncoderBackend::Impl::make_access_units(
     std::vector<FfmpegEncodedPacket> packets) {
     std::vector<model::EncodedVideoAccessUnit> access_units;
     access_units.reserve(packets.size());
@@ -333,13 +379,13 @@ FfmpegH264EncoderBackend::make_access_units(
     return access_units;
 }
 
-contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::fail(
+contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::Impl::fail(
     VideoEncoderIssue issue_value) {
     state_ = State::Failed;
     return std::unexpected{std::move(issue_value)};
 }
 
-void FfmpegH264EncoderBackend::close() noexcept {
+void FfmpegH264EncoderBackend::Impl::close() noexcept {
     encoder_.close();
     encoder_frame_.reset();
     converter_.reset();
@@ -349,6 +395,31 @@ void FfmpegH264EncoderBackend::close() noexcept {
     last_submitted_ticks_.reset();
     last_emitted_ticks_.reset();
     state_ = State::Closed;
+}
+
+FfmpegH264EncoderBackend::FfmpegH264EncoderBackend()
+    : impl_(std::make_unique<Impl>()) {}
+
+FfmpegH264EncoderBackend::~FfmpegH264EncoderBackend() {
+    impl_->close();
+}
+
+contracts::encoder::VideoEncoderOpenResult FfmpegH264EncoderBackend::open(
+    const contracts::encoder::VideoEncoderConfig& config) {
+    return impl_->open(config);
+}
+
+contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::encode(
+    const model::CapturedVideoFrame& frame) {
+    return impl_->encode(frame);
+}
+
+contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::flush() {
+    return impl_->flush();
+}
+
+void FfmpegH264EncoderBackend::close() noexcept {
+    impl_->close();
 }
 
 }  // namespace semilive::publisher::infra::ffmpeg

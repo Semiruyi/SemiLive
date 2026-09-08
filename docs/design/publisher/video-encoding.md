@@ -69,11 +69,11 @@ metadata。`FfmpegH264EncoderBackend` 负责输入校验、placement、颜色转
 关联以及从 `EncodedPacket` 组装 `EncodedVideoAccessUnit`。packet 字节通过移动进入 AU，不增加
 一次码流复制。
 
-FFmpeg 资源类型在基础设施头文件中只以前置声明和带自定义 deleter 的 RAII 指针出现，FFmpeg C
-头文件只由 `.cpp` 包含。`FfmpegH264EncoderBackend` 直接组合 `SwsFrameConverter`、
-`FfmpegH264Encoder` 和最终输入帧，不为 Backend 再增加 PImpl；小型 `AVRational` 等值类型在
-`.cpp` 中按值构造，不为隐藏头文件而进行堆分配。该边界使 FFmpeg include 路径和链接依赖保持
-在基础设施 target 的私有实现中。
+FFmpeg 资源类型在基础设施私有头文件中只以前置声明和带自定义 deleter 的 RAII 指针出现，FFmpeg
+C 头文件只由 `.cpp` 和白盒测试包含。`FfmpegH264EncoderBackend` 使用 PImpl 封装
+`SwsFrameConverter`、`FfmpegH264Encoder`、最终输入帧和会话状态；公开头只保留 Backend 契约与
+`unique_ptr<Impl>`。小型 `AVRational` 等值类型仍在 `.cpp` 中按值构造。该边界使 FFmpeg helper、
+include 路径和链接依赖全部保持在基础设施 target 的私有实现中。
 
 ### 2.2 首版线程边界
 

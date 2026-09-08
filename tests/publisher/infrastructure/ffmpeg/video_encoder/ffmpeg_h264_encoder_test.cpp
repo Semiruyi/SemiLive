@@ -1,4 +1,4 @@
-#include "publisher/infrastructure/ffmpeg/video_encoder/ffmpeg_h264_encoder.hpp"
+#include "video_encoder/ffmpeg_h264_encoder.hpp"
 
 extern "C" {
 #include <libavutil/frame.h>

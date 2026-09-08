@@ -1,4 +1,4 @@
-#include "publisher/infrastructure/ffmpeg/video_encoder/sws_frame_converter.hpp"
+#include "video_encoder/sws_frame_converter.hpp"
 
 extern "C" {
 #include <libavutil/error.h>

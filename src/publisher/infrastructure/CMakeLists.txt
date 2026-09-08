@@ -8,5 +8,6 @@ add_library(SemiLive::PublisherInfrastructure ALIAS semilive_publisher_infrastru
 
 target_link_libraries(semilive_publisher_infrastructure INTERFACE
     SemiLive::PublisherInfraCapture
+    SemiLive::PublisherInfraFfmpeg
     SemiLive::PublisherInfraNotifier
 )

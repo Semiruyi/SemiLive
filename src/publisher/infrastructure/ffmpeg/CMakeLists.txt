@@ -12,12 +12,28 @@ pkg_check_modules(SEMILIVE_FFMPEG_AVCODEC REQUIRED
     libavutil
 )
 
-target_sources(semilive_publisher_core PRIVATE
-    ffmpeg_raii.cpp
+add_library(semilive_publisher_infra_ffmpeg STATIC
+    src/ffmpeg_raii.cpp
+    src/video_encoder/ffmpeg_h264_encoder.cpp
+    src/video_encoder/ffmpeg_h264_encoder_backend.cpp
+    src/video_encoder/sws_frame_converter.cpp
 )
 
-target_link_libraries(semilive_publisher_core PRIVATE
-    PkgConfig::SEMILIVE_FFMPEG_AVCODEC
-)
+add_library(SemiLive::PublisherInfraFfmpeg ALIAS semilive_publisher_infra_ffmpeg)
 
-add_subdirectory(video_encoder)
+target_include_directories(semilive_publisher_infra_ffmpeg
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_compile_features(semilive_publisher_infra_ffmpeg PUBLIC cxx_std_23)
+target_link_libraries(semilive_publisher_infra_ffmpeg
+    PUBLIC
+        SemiLive::PublisherContracts
+        SemiLive::PublisherModel
+    PRIVATE
+        PkgConfig::SEMILIVE_FFMPEG_AVCODEC
+        PkgConfig::SEMILIVE_FFMPEG_SWSCALE
+)
+semilive_enable_warnings(semilive_publisher_infra_ffmpeg)

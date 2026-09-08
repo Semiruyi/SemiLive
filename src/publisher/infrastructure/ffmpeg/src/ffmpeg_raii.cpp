@@ -1,4 +1,4 @@
-#include "publisher/infrastructure/ffmpeg/ffmpeg_raii.hpp"
+#include "ffmpeg_raii.hpp"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
