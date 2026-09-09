@@ -20,6 +20,8 @@ public:
     EncodedVideoAccessUnitSink(EncodedVideoAccessUnitSink&&) = delete;
     EncodedVideoAccessUnitSink& operator=(EncodedVideoAccessUnitSink&&) = delete;
 
+    // Full must leave access_unit unchanged. Ownership transfers only when the
+    // result is Accepted, allowing a producer to retain and retry pending AUs.
     [[nodiscard]] virtual EncodedVideoAccessUnitPushResult try_push(
         model::EncodedVideoAccessUnit&& access_unit) = 0;
     [[nodiscard]] virtual bool full() const noexcept = 0;

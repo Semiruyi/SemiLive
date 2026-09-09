@@ -588,7 +588,7 @@ ffprobe 还原验证。运行 30 分钟确认内存不持续增长，并记录�
   Backend 不依赖领域模块；
 - 不公开 `VideoFrameProcessor`、通用 YUV 中间对象或 FFmpeg 类型；
 - FFmpeg Backend 内部按 placement、swscale 和 codec 职责拆分类与文件；
-- FFmpeg 类型通过前置声明和 RAII 指针留在基础设施内部，Backend 直接组合 helper，不增加 PImpl；
+- FFmpeg 类型通过前置声明、RAII 指针和 Backend PImpl 留在基础设施内部；
 - `FfmpegH264Encoder` 是只接收 `AVFrame`、返回拥有型 packet 的纯 codec helper，不保存领域 metadata；
 - Backend 会话显式区分 `Closed`、`Open`、`Flushed` 和 `Failed`，调用顺序错误使用 `State` issue；
 - 首版 Backend 报告并强制最多保留一个延迟输入，flush 成功后不得残留 metadata；
