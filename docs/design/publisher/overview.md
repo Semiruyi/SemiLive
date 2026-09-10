@@ -81,7 +81,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 共享模型 | `MediaTime`、媒体时钟、音视频帧和编码单元 | 定义各层共同使用的稳定数据、值类型与纯转换 |
 | 领域 Worker | [`VideoCaptureWorker`](video-capture-worker.md) | 按目标帧率采集并发布 BGRA 帧 |
 | 领域 Worker | [`VideoEncoderWorker`](video-encoding.md) | 消费 BGRA 帧并编排 H.264 编码与背压 |
-| 领域 Worker | `VideoRtpSenderWorker` | 保存可选码流、拆分 NAL、RTP 封包和 UDP 发送 |
+| 领域 Worker | [`VideoOutputWorker`](video-output.md) | 消费视频 AU，并把线程与会话控制委托给可替换输出 Backend |
 | 领域 Worker | `AudioCaptureWorker` | 事件驱动采集 WASAPI Loopback PCM，并保留设备时钟信息 |
 | 领域 Worker | `AudioEncoderWorker` | 消费 PCM，完成格式处理、重采样和音频编码 |
 | 领域 Worker | `AudioRtpSenderWorker` | 音频 RTP 封包和 UDP 发送 |
@@ -93,12 +93,14 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 领域服务 | `SessionTimeline` | 保存音视频共享的不可变单调会话原点并换算媒体时间 |
 | 领域服务 | `H264NalSplitter` | 拆分 Annex-B Access Unit 中的 NAL |
 | 领域服务 | `H264RtpPacketizer` | RFC 6184 Single NAL/FU-A 封包 |
+| 领域输出 | `H264RtpOutputBackend` | M2 组合 H.264 Packetizer 与 `DatagramSink`，实现视频主输出契约 |
 | 领域服务 | `AudioRtpPacketizer` | 按选定音频格式生成 RTP Payload |
 | 后端契约 | [`DesktopCaptureBackend`](desktop-capture-backend.md) | 提供最新桌面图像 |
 | 后端契约 | `SystemAudioCaptureBackend` | 提供带设备位置和单调时钟关联的 PCM 块 |
 | 后端契约 | `AudioFrameProcessor` | 声道布局、采样格式和采样率转换 |
 | 后端契约 | [`VideoEncoderBackend`](video-encoding.md) | 接收 BGRA 帧，完成预处理并输出 H.264 AU |
 | 后端契约 | `AudioEncoderBackend` | 接收处理后的 PCM 并输出编码音频包 |
+| 后端契约 | [`VideoAccessUnitOutputBackend`](video-output.md) | 同步消费一个完整视频 AU，隔离文件或 RTP 主输出 |
 | 后端契约 | `DatagramSink` | 发送一个完整数据报 |
 | 通知契约 | `Notifier` | 定义按事件类型同步发布、订阅和订阅生命周期 |
 | 基础设施 | `DxgiDesktopCaptureBackend` | D3D11/DXGI Desktop Duplication 实现 |
@@ -107,6 +109,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 基础设施 | `WasapiLoopbackCaptureBackend` | Windows 系统音频采集实现 |
 | 基础设施 | `SwrAudioFrameProcessor` | FFmpeg libswresample 音频处理实现 |
 | 基础设施 | `FfmpegAudioEncoderBackend` | 首版选定格式的 FFmpeg 音频编码实现 |
+| 基础设施 | `H264FileOutputBackend` | M1 正式主输出，把 Annex-B AU 顺序写入本地文件 |
 | 基础设施 | `UdpDatagramSink` | Winsock UDP 实现 |
 | 基础设施 | `MemoryDatagramSink` | RTP 单元和集成测试实现 |
 | 基础设施 | `H264FileRecorder` | 通过独立有界队列异步保存可选 Annex-B 诊断输出 |
@@ -142,12 +145,13 @@ flowchart TB
         VideoCaptureBackend[Dxgi 或 Synthetic Capture Backend]
         VideoScheduler[FrameScheduler]
         VideoEncoderBackend[FfmpegH264EncoderBackend]
-        VideoPacketizer[H264NalSplitter + H264RtpPacketizer]
-        VideoFileRecorder[Optional Async H264FileRecorder]
-        VideoDatagram[Video DatagramSink]
+        VideoOutputBackend[H264FileOutputBackend 或 H264RtpOutputBackend]
+        VideoPacketizer[M2 H264NalSplitter + H264RtpPacketizer]
+        VideoFileRecorder[M2 Optional Async H264FileRecorder]
+        VideoDatagram[M2 Video DatagramSink]
         VideoCapture[VideoCaptureWorker]
         VideoEncoder[VideoEncoderWorker]
-        VideoSender[VideoRtpSenderWorker]
+        VideoOutput[VideoOutputWorker]
 
         VideoCaptureBackend -.-> VideoCapture
         VideoScheduler -.-> VideoCapture
@@ -155,10 +159,11 @@ flowchart TB
         VideoFrameStore --> VideoEncoder
         VideoEncoderBackend -.-> VideoEncoder
         VideoEncoder --> VideoAuQueue
-        VideoAuQueue --> VideoSender
-        VideoPacketizer -.-> VideoSender
-        VideoFileRecorder -.-> VideoSender
-        VideoDatagram -.-> VideoSender
+        VideoAuQueue --> VideoOutput
+        VideoOutputBackend -.-> VideoOutput
+        VideoPacketizer -. M2 .-> VideoOutputBackend
+        VideoFileRecorder -. M2 诊断副本 .-> VideoOutputBackend
+        VideoDatagram -. M2 .-> VideoOutputBackend
     end
 
     subgraph Audio[Audio Pipeline - 视频闭环后实现]
@@ -208,6 +213,7 @@ Composition 也不得暴露 Worker、Store 或 Backend 查找接口。
 
 - `VideoCaptureWorker` 和 `AudioCaptureWorker` 不知道编码器和 RTP；
 - `VideoEncoderWorker` 不知道 DXGI 和 UDP；
+- `VideoOutputWorker` 不知道文件系统、RTP 和 UDP，只依赖输出 Backend 契约；
 - `AudioEncoderWorker` 不知道 WASAPI 和 UDP；
 - `H264RtpPacketizer` 不知道 socket；
 - `AudioRtpPacketizer` 不知道 socket；
@@ -233,8 +239,9 @@ flowchart LR
     FrameStore --> VideoEncoder[VideoEncoderWorker]
     VideoEncoder --> H264[BGRA Process + H.264 Encode]
     H264 -->|EncodedVideoAccessUnit| VideoAuQueue[EncodedVideoAccessUnitQueue\ncapacity = 4\nreject when full]
-    VideoAuQueue --> VideoSender[VideoRtpSenderWorker]
-    VideoSender --> VideoUdp[Video UDP Datagram Sink]
+    VideoAuQueue --> VideoOutput[VideoOutputWorker]
+    VideoOutput --> VideoOutputBackend[M1 H264 File / M2 H264 RTP Backend]
+    VideoOutputBackend --> VideoDestination[.h264 File / Video UDP Datagram Sink]
 
     SystemAudio[Windows System Audio] --> Wasapi[WASAPI Loopback Backend]
     Wasapi --> AudioCapture[AudioCaptureWorker]
@@ -263,7 +270,7 @@ flowchart LR
 | Main | `semilive_publisher` | Controller、配置和统计展示 | 可以等待启动、停止和会话终态 |
 | Video Capture Thread | `VideoCaptureWorker` | DXGI 后端、FrameScheduler、最近桌面画面 | 可以等待采集或帧率时刻；不得被下游长期阻塞 |
 | Video Encode Thread | `VideoEncoderWorker` | swscale 和 FFmpeg 视频编码上下文 | 输入为空或视频 AU 输出满时等待 |
-| Video Send Thread | `VideoRtpSenderWorker` | H.264 Packetizer 和视频 UDP socket | 输入为空时等待；发送失败按错误策略处理 |
+| Video Output Thread | `VideoOutputWorker` | 当前主输出 Backend；M1 文件或 M2 H.264 Packetizer 与 UDP socket | 输入为空时等待；输出失败按错误策略处理 |
 | Diagnostic File Thread | `H264FileRecorder` | 诊断队列和 `.h264` 文件句柄 | 只消费有界诊断队列；不得反压视频编码或 RTP 发送 |
 | Audio Capture Thread | `AudioCaptureWorker` | WASAPI 后端和设备时钟映射状态 | 可以等待 WASAPI 事件；不得被下游长期阻塞 |
 | Audio Encode Thread | `AudioEncoderWorker` | swresample 和 FFmpeg 音频编码上下文 | 输入为空时等待；不得造成无界 PCM 积压 |
@@ -413,7 +420,7 @@ CapturedVideoFrameStoreControl 仅供 PublisherController
 
 ```text
 EncodedVideoAccessUnitSink   仅供 VideoEncoderWorker
-EncodedVideoAccessUnitSource 仅供 VideoRtpSenderWorker
+EncodedVideoAccessUnitSource 仅供 VideoOutputWorker
 EncodedVideoAccessUnitQueueControl 仅供 PublisherController
 ```
 
@@ -421,7 +428,7 @@ EncodedVideoAccessUnitQueueControl 仅供 PublisherController
 `pending_access_unit` 并等待 `NotFull` 后重试。已经编码的 P 帧不能像原始采集帧一样任意
 丢弃，否则会损坏后续参考关系。
 
-如果发送端持续无法消费：
+如果主输出持续无法消费：
 
 ```text
 AU Queue 满
@@ -564,13 +571,18 @@ Synthetic 和早期无设备编码闭环不依赖指针。
 
 ### 10.2 视频诊断文件
 
-M1 只启用 `.h264` 文件输出，用 ffprobe 和 ffplay 验证编码结果；M2 以 RTP 为主输出，允许
-同时启用可选 `.h264` 诊断记录。双输出不引入通用媒体 Graph，也不增加第二个领域 AU
-消费者：`VideoRtpSenderWorker` 在处理 AU 时向 `H264FileRecorder` 提交一份 Annex-B 数据
-副本，Recorder 通过独立线程和有界队列写盘。提交操作始终非阻塞；默认队列同时受 64 个
-AU 和 8 MiB 字节预算约束，达到任一上限即视为记录过载。
+M1 使用 `VideoOutputWorker + H264FileOutputBackend` 作为正式主输出，正常启动 Publisher 即可
+生成 `.h264` 文件，并用 ffprobe 和 ffplay 验证编码结果。该文件输出参与会话正确性和背压；
+打开、写入或 flush 失败会终止当前发布会话。详细边界见
+[视频输出阶段设计](video-output.md)。
 
-文件记录属于 best-effort 诊断能力，不参与发布会话正确性：诊断队列已满、文件打开失败或
+M2 保留同一个 `VideoOutputWorker`，把主输出替换为 `H264RtpOutputBackend`，并允许同时启用
+可选 `.h264` 诊断记录。双输出不增加第二个领域 AU Queue 消费者：RTP Backend 在处理 AU 时
+向 `H264FileRecorder` 提交一份 Annex-B 数据副本，Recorder 通过独立线程和有界队列写盘。
+提交操作始终非阻塞；默认队列同时受 64 个 AU 和 8 MiB 字节预算约束，达到任一上限即视为
+记录过载。
+
+上述 M2 诊断文件记录属于 best-effort 能力，不参与发布会话正确性：诊断队列已满、文件打开失败或
 写入失败时，Recorder 停止本次记录、保留并明确标记不完整文件、更新统计并报告非致命
 诊断错误；视频编码和 RTP 发送继续运行。性能和 30 分钟稳定性验收默认关闭文件记录，避免
 把磁盘吞吐计入实时链路结果。
@@ -584,13 +596,13 @@ Type 和 RTP 时钟频率列为音频实现前确认项，不在未验证环境�
 ### 10.4 双轨传输
 
 一个发布会话包含零或一条视频轨道以及零或一条音频轨道，至少启用一条。首版不支持同类
-多轨。每条轨道拥有独立的：
+多轨。进入 M2 后，每条 RTP 轨道拥有独立的：
 
 - SSRC、Payload Type、RTP 序列号和随机初始时间戳；
 - 目标 UDP 端口和 `DatagramSink` 实例；
-- Packetizer、发送 Worker、队列和传输统计。
+- Packetizer、主输出 Backend、队列和传输统计。
 
-视频和音频首版使用不同 UDP 端口，不在同一个 Socket 上复用。这保持 Worker 对 Socket
+视频和音频首版使用不同 UDP 端口，不在同一个 Socket 上复用。这保持各自输出线程对 Socket
 的线程独占，并避免共享发送队列造成跨媒体背压。会话描述必须关联两条轨道，并提供 codec、
 endpoint、Payload Type、SSRC、clock rate 及共享时间映射所需信息。
 
@@ -618,13 +630,15 @@ PublisherController: start_publishing / stop_publishing / state / stats
 `SessionTimeline`，再按消费者到生产者的阶段顺序配置并启动所有已启用轨道：
 
 ```text
-0. 可选 H264FileRecorder
-1. VideoRtpSenderWorker / AudioRtpSenderWorker
+0. M2 可选 H264FileRecorder
+1. VideoOutputWorker / AudioRtpSenderWorker
 2. VideoEncoderWorker / AudioEncoderWorker
 3. VideoCaptureWorker / AudioCaptureWorker
 ```
 
-诊断 Recorder 打开文件失败时只禁用本次记录并报告非致命错误，不阻止 Sender 启动。
+M1 的文件主输出打开失败会使启动失败；M2 诊断 Recorder 打开文件失败时只禁用本次记录并报告
+非致命错误，不阻止 RTP 主输出启动。视频输出的完整生命周期见
+[视频输出阶段设计](video-output.md)。
 
 同一阶段内按确定顺序同步启动 Worker。首版接受有界的初始化顺序差异，不要求两个采集后端在
 同一时刻产生首个媒体单元；Capture Worker 在各自后端成功打开后记录真实 `track_start`，并
@@ -645,8 +659,8 @@ Ctrl+C 触发正常停止：
 2. 确认所有已启用的 Capture Worker 不再产生新媒体
 3. 以 Drain 模式命令两个 Encoder Worker 分别排空输入并 flush 编码器
 4. 等待两个 Encoder Worker 回到 Idle
-5. 命令两个 RTP Sender Worker 分别排空编码输出并关闭 socket
-6. 等待两个 Sender Worker 回到 Idle
+5. 命令 VideoOutputWorker 和 AudioRtpSenderWorker 分别排空编码输出并关闭 Backend
+6. 等待两个输出 Worker 回到 Idle
 7. 命令可选 H264FileRecorder 排空已接受的诊断数据并关闭文件
 8. Controller 通过 Control 接口防御性 clear 所有空资源并回到 Idle
 ```
@@ -744,8 +758,8 @@ SyntheticDesktopCaptureBackend
 -> CapturedVideoFrameStore
 -> VideoEncoderWorker
 -> FakeVideoEncoderBackend 或 FFmpeg Backend
--> VideoRtpSenderWorker
--> MemoryDatagramSink
+-> VideoOutputWorker
+-> H264FileOutputBackend，或 H264RtpOutputBackend -> MemoryDatagramSink
 ```
 
 普通 Windows/Linux CI 不依赖真实桌面、显卡或网络。
@@ -766,7 +780,7 @@ SyntheticSystemAudioCaptureBackend
 ### 13.3 外部交叉验证
 
 - Synthetic/DXGI -> FFmpeg 编码 -> `.h264`；
-- 使用 `ffprobe` 检查编码格式、分辨率、帧率和时间戳；
+- 使用 `ffprobe` 检查编码格式、分辨率、帧率和码流结构；应用层 PTS 由 Output Worker 检查；
 - 使用 `ffplay` 播放输出；
 - 使用 SemiStreamProbe 检查 RTP/NAL/FU-A；
 - 视频闭环完成后执行 1080p30、30 分钟稳定性测试。
@@ -814,6 +828,7 @@ src/publisher/
       processing/audio_frame_processor.hpp
       encoder/video_encoder_backend.hpp
       encoder/audio_encoder_backend.hpp
+      output/video_access_unit_output_backend.hpp
       transport/datagram_sink.hpp
 
   domain/
@@ -825,10 +840,11 @@ src/publisher/
       resource/encoded_audio_packet_queue/...
       worker/video_capture/...
       worker/video_encoder/...
-      worker/video_rtp_sender/...
+      worker/video_output_worker/...
       worker/audio_capture/...
       worker/audio_encoder/...
       worker/audio_rtp_sender/...
+      output/h264_rtp_output_backend.*
       rtp/...
       timing/...
       stats/...
@@ -868,9 +884,16 @@ src/publisher/
         video_encoder/...
         audio_processor/...
         audio_encoder/...
+    output/
+      CMakeLists.txt
+      include/semilive/publisher/infrastructure/output/
+        h264_file_output_backend.hpp
+        h264_file_recorder.hpp
+      src/
+        h264_file_output_backend.cpp
+        h264_file_recorder.cpp
     transport/udp_datagram_sink.*
     transport/memory_datagram_sink.*
-    output/h264_file_recorder.*
 
   composition/
     publisher_composition.*
@@ -905,7 +928,8 @@ CMake 的部署目标对应三个最终程序。Publisher 内部模块使用独�
 
 - 设计覆盖音视频，实施先完成视频闭环，再实现音频和音画同步；
 - 不为尚未实现的音频创建占位代码或通用媒体 Graph；
-- 视频和音频各由 Capture、Encoder、RTP Sender 三个 Worker 组成，每个 Worker 独占线程；
+- 视频由 Capture、Encoder、Output 三个 Worker 组成；M1 Output 使用文件 Backend，M2 替换为
+  RTP Backend。音频仍使用类型明确的 Capture、Encoder 和 RTP Sender；
 - 两条轨道共享单调会话时间轴，共享模型中的媒体时间不绑定 RTP 时钟频率；
 - 两条轨道拥有独立 SSRC、Payload Type、RTP 状态、UDP 端口、Socket、队列和统计；
 - 首版不支持同类多轨，至少启用一条轨道；
@@ -923,8 +947,9 @@ CMake 的部署目标对应三个最终程序。Publisher 内部模块使用独�
 - 首版真实视频编码使用 FFmpeg `libx264`、YUV420P、1080p30、4 Mbps、GOP 60、无 B 帧；
 - 非 16:9 桌面等比缩放并居中黑边填充，不拉伸或裁剪；
 - DXGI 鼠标指针合成可配置，真实桌面发布默认开启；
-- M1 使用 `.h264` 文件验证，M2 允许 RTP 与异步 best-effort 诊断记录同时开启；
-- 诊断文件队列或写入失败只终止记录，不得反压或终止视频发布；
+- M1 使用正式文件主输出运行 Publisher 并验证 `.h264`；M2 复用 Output Worker、替换为 RTP
+  Backend，并允许异步 best-effort 诊断记录同时开启；
+- M2 诊断文件队列或写入失败只终止记录，不得反压或终止视频发布；
 - 音频采集不得被下游长期阻塞，所有音频积压有界且必须保留不连续语义；
 - 使用 Synthetic、Fake 和 Memory 后端保证两条链路可测试性。
 

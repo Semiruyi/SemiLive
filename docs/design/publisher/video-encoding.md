@@ -86,10 +86,10 @@ Video Capture Thread
    -> BGRA scale/letterbox/YUV420P
    -> libx264 encode
 -> EncodedVideoAccessUnitQueue(capacity = 4, reject when full)
--> Video Send Thread
+-> Video Output Thread
 ```
 
-Capture、Encode 和后续 Send 已经可以并行。Video Encode Thread 顺序调用颜色转换与编码 API，
+Capture、Encode 和后续 Output 已经可以并行。Video Encode Thread 顺序调用颜色转换与编码 API，
 但 libx264 可以在 Backend 内使用自己的受控线程；“一个 Encode Worker”不等于整个编码过程只
 使用一个 CPU 核。
 
@@ -559,14 +559,17 @@ Synthetic 或 DXGI Backend
 -> CapturedVideoFrameStore
 -> VideoEncoderWorker
 -> EncodedVideoAccessUnitQueue
--> 测试用 H.264 文件消费者
+-> VideoOutputWorker
+-> H264FileOutputBackend
 ```
 
-测试消费者只用于 M1 验证，不进入正式生产数据流。使用 ffprobe/ffplay 检查可解码性、
-1920 x 1080、30 fps、YUV420P、关键帧间隔与黑边；AU 消费者在写文件前检查应用层
+M1 把文件 Backend 作为 Publisher 的正式主输出，而不是单独的 smoke 消费者。正常启动应用即可
+使用 DXGI 和 libx264 生成 `.h264` 文件；使用 ffprobe/ffplay 检查可解码性、1920 x 1080、
+30 fps、YUV420P、关键帧间隔与黑边。Output Worker 在写文件前检查应用层
 `presentation_time` 严格单调，因为原始 Annex-B `.h264` 不携带每个 AU 的应用层 PTS，不能靠
 ffprobe 还原验证。运行 30 分钟确认内存不持续增长，并记录预处理、编码、FrameStore 替换、
-实际码率和采集到编码延迟。正式的可选 `H264FileRecorder` 仍在 VideoRtpSenderWorker 阶段接入。
+实际码率和采集到输出延迟。主输出 Backend、M2 RTP 替换和可选诊断 Recorder 的区别见
+[视频输出阶段设计](video-output.md)。
 
 ## 11. 实现顺序
 
@@ -577,7 +580,8 @@ ffprobe 还原验证。运行 30 分钟确认内存不持续增长，并记录�
 5. 实现 `FfmpegH264EncoderBackend` 的编排、metadata 关联和独立 FFmpeg 集成测试；
 6. 实现 `VideoEncoderWorker` 的线程、命令、通知、pending 和两种停止路径；
 7. 接入已有 FrameStore 与 AU Queue，完成 Synthetic 无设备闭环；
-8. 完成真实 DXGI 到 `.h264` 的 M1 验证和性能报告；
+8. 接入 `VideoOutputWorker` 和 `H264FileOutputBackend`，完成真实应用 DXGI 到 `.h264` 的 M1
+   验证和性能报告；
 9. 性能数据不足时先优化当前 Backend，只有满足拆线程条件后再写新的设计。
 
 ## 12. 已决定
