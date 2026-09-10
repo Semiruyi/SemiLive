@@ -2,6 +2,7 @@ add_library(semilive_publisher_test_support STATIC
     capture/scripted_desktop_capture_backend.cpp
     encoder/scripted_video_encoder_backend.cpp
     notifier/synchronous_notifier.cpp
+    output/scripted_video_output_backend.cpp
 )
 target_include_directories(semilive_publisher_test_support PUBLIC
     ${PROJECT_SOURCE_DIR}/tests

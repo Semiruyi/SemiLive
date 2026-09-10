@@ -7,6 +7,7 @@ add_library(semilive_publisher_domain STATIC
     src/timing/session_timeline.cpp
     src/worker/video_capture_worker/default_video_capture_worker.cpp
     src/worker/video_encoder_worker/default_video_encoder_worker.cpp
+    src/worker/video_output_worker/default_video_output_worker.cpp
 )
 
 add_library(SemiLive::PublisherDomain ALIAS semilive_publisher_domain)
