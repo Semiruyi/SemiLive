@@ -1,8 +1,9 @@
 /build/
 /build-*/
 /out/
+/logs/
+/semilive.h264
 /.vs/
 /.idea/
 *.suo
 *.user
-
