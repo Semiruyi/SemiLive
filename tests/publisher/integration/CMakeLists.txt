@@ -18,6 +18,7 @@ add_executable(semilive_publisher_video_file_output_pipeline_test
     video_file_output_pipeline_test.cpp
 )
 target_link_libraries(semilive_publisher_video_file_output_pipeline_test PRIVATE
+    SemiLive::PublisherApplication
     SemiLive::PublisherDomain
     SemiLive::PublisherInfraCapture
     SemiLive::PublisherInfraFfmpeg

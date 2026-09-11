@@ -77,7 +77,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 
 | 层次 | 模块 | 职责 |
 |---|---|---|
-| 应用层 | `PublisherController` | 校验会话状态，编排启动、停止、等待和失败汇聚 |
+| 应用层 | [`PublisherController`](publisher-controller.md) | 校验会话状态，编排启动、停止、等待和失败汇聚 |
 | 共享模型 | `MediaTime`、媒体时钟、音视频帧和编码单元 | 定义各层共同使用的稳定数据、值类型与纯转换 |
 | 领域 Worker | [`VideoCaptureWorker`](video-capture-worker.md) | 按目标帧率采集并发布 BGRA 帧 |
 | 领域 Worker | [`VideoEncoderWorker`](video-encoding.md) | 消费 BGRA 帧并编排 H.264 编码与背压 |
@@ -115,7 +115,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 基础设施 | `H264FileRecorder` | 通过独立有界队列异步保存可选 Annex-B 诊断输出 |
 | 基础设施 | `DefaultNotifier` | `Notifier` 的线程安全进程内实现 |
 | 公共基础设施 | `semilive::log` | 进程级异步日志、滚动文件、控制台输出和故障降级 |
-| 可观测性 | `PublisherStats` | 原子计数、耗时累计、峰值和统计快照 |
+| 可观测性 | `PublisherControllerStats` | 汇总会话、Worker 和领域资源统计快照 |
 | 装配层 | `PublisherComposition` | 管理进程级模块装配、所有权和逆序释放 |
 
 ## 4. 依赖关系
@@ -136,8 +136,6 @@ flowchart TB
     Config --> Composition
 
     Composition -->|创建并持有| Notifier[DefaultNotifier]
-    Composition -->|创建| Stats[PublisherStats]
-    Composition -->|创建| Clock[SessionTimeline]
 
     subgraph Video[Video Pipeline]
         VideoFrameStore[CapturedVideoFrameStore]
@@ -193,15 +191,13 @@ flowchart TB
     Composition --> Audio
     Notifier -. 注入 .-> Video
     Notifier -. 注入 .-> Audio
-    Stats -. 注入 .-> Video
-    Stats -. 注入 .-> Audio
-    Clock -. 共享媒体时间 .-> Video
-    Clock -. 共享媒体时间 .-> Audio
 
     Composition -->|创建并持有| Controller[PublisherController]
+    Controller -->|每次会话创建| Clock[SessionTimeline]
+    Clock -. 共享媒体时间 .-> Video
+    Clock -. 共享媒体时间 .-> Audio
     Video -. 控制接口注入 .-> Controller
     Audio -. 控制接口注入 .-> Controller
-    Stats -. 注入 .-> Controller
     App -. controller 非拥有访问 .-> Controller
 ```
 
@@ -648,7 +644,8 @@ M1 的文件主输出打开失败会使启动失败；M2 诊断 Recorder 打开�
 
 任一阶段启动失败时，Controller 按逆序 abort 所有已经启动的轨道模块、清理资源并返回结构化
 错误；此时不要求排空尚未形成完整运行链路的数据。Worker 模块及其常驻线程仍由 Composition
-持有。
+持有。Controller 的公开状态、命令串行化和精确回滚语义见
+[PublisherController 设计](publisher-controller.md)。
 
 ### 11.3 正常停止
 
@@ -686,20 +683,26 @@ Worker 只上报第一个致命错误。首版任一已启用轨道失败均视�
 
 异常不得越过线程入口；Worker 顶层捕获异常并转换为内部失败。
 
+Controller 不在 Notifier 回调中直接停止 Worker。回调只向 Controller 控制线程提交失败命令；
+正常 Drain 的同步等待也不能阻塞该控制线程，否则 Output 失败后 Encoder 可能因 AU Queue 已满
+而无法完成 Drain。具体的可中断 Drain 协议见
+[PublisherController 设计](publisher-controller.md)。
+
 ### 11.5 进程释放
 
 Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话仍在运行，Composition
 先要求 Controller 停止会话，再停止 Controller 控制线程和所有已装配 Worker 常驻线程，最后按
-依赖逆序释放 Worker、Backend、资源、Stats 和 Notifier。
+依赖逆序释放 Worker、Backend、资源和 Notifier。
 
 资源析构时必须已经没有线程访问它们。`dispose()` 幂等；Composition 析构函数将其作为
 兜底调用，但正常路径仍显式调用，以便记录停止失败。
 
 ## 12. 可观测性
 
-`PublisherStats` 不创建线程。所有 Worker 更新原子计数和耗时累计，Main 每秒读取一致的
-统计快照。快照按 `session`、`video` 和 `audio` 分组；未启用轨道明确标记为 disabled，
-不以全零数据冒充已运行轨道。
+每个 Worker 维护自己的线程安全统计，领域资源维护水位计数。`PublisherControllerStats` 在读取时
+汇总会话计数、Worker 快照和资源水位，不创建统计线程。运行期间的跨 Worker 字段不承诺同一
+时刻的事务一致性，停止后的最终快照必须稳定。多轨实现后快照按 `session`、`video` 和 `audio`
+分组；未启用轨道明确标记为 disabled，不以全零数据冒充已运行轨道。
 
 首版至少记录：
 

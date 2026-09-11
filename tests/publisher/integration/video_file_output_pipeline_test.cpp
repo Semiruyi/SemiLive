@@ -1,3 +1,4 @@
+#include <semilive/publisher/application/publisher_controller/default_publisher_controller.hpp>
 #include <semilive/publisher/domain/resource/captured_video_frame_store/captured_video_frame_store.hpp>
 #include <semilive/publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue.hpp>
 #include <semilive/publisher/domain/worker/video_capture_worker/default_video_capture_worker.hpp>
@@ -31,6 +32,7 @@ namespace {
 using namespace std::chrono_literals;
 
 namespace capture = semilive::publisher::contracts::capture;
+namespace app = semilive::publisher::application;
 namespace domain = semilive::publisher::domain;
 namespace ffmpeg = semilive::publisher::infra::ffmpeg;
 namespace infra = semilive::publisher::infra;
@@ -166,36 +168,33 @@ void synthetic_capture_reaches_a_real_h264_file() {
         frame_store,
         notifier};
 
-    const auto output_started = output_worker.start();
-    require(output_started.has_value(),
-            output_started ? "output must start" :
-                             output_started.error().message);
-    require(output_started->output.output_name == output_file.path().string(),
-            "output worker must report the configured H.264 file");
+    app::PublisherVideoSessionPlan plan;
+    plan.capture = {};
+    plan.recovery_timeout = 5s;
+    plan.encoder.output = {64, 64};
+    plan.encoder.frame_rate = {30, 1};
+    plan.encoder.target_bit_rate = 300'000;
+    plan.encoder.gop_size = 4;
 
-    domain::VideoEncoderSessionConfig encoder_config;
-    encoder_config.encoder.output = {64, 64};
-    encoder_config.encoder.frame_rate = {30, 1};
-    encoder_config.encoder.target_bit_rate = 300'000;
-    encoder_config.encoder.gop_size = 4;
+    app::DefaultPublisherController controller{
+        plan,
+        {capture_worker,
+         encoder_worker,
+         output_worker,
+         frame_store,
+         access_unit_queue},
+        notifier};
 
-    const auto encoder_started = encoder_worker.start(encoder_config);
-    require(encoder_started.has_value(),
-            encoder_started ? "encoder must start" :
-                              encoder_started.error().message);
-    require(encoder_started->encoder.encoder_name == "libx264",
+    const auto started = controller.start_publishing();
+    require(started.has_value(),
+            started ? "publisher must start" : started.error().message);
+    require(started->output.output.output_name == output_file.path().string(),
+            "controller must report the configured H.264 file");
+    require(started->encoder.encoder.encoder_name == "libx264",
             "the file pipeline must use the real libx264 encoder");
-
-    domain::VideoCaptureSessionConfig capture_config{
-        {},
-        domain::SessionTimeline{std::chrono::steady_clock::now()},
-        {30, 1},
-        5s,
-    };
-    const auto capture_started = capture_worker.start(capture_config);
-    require(capture_started.has_value(),
-            capture_started ? "capture must start" :
-                              capture_started.error().message);
+    require(started->capture.source.output_name ==
+                "Synthetic File Output Pipeline",
+            "controller must preserve capture startup information");
 
     require(wait_until([&] {
                 return capture_worker.stats().published_frames >= 8 &&
@@ -203,15 +202,16 @@ void synthetic_capture_reaches_a_real_h264_file() {
             }),
             "capture, encoding, and file output must all make progress");
 
-    capture_worker.stop();
-    encoder_worker.stop(domain::VideoEncoderStopMode::Drain);
-    output_worker.stop(domain::VideoOutputStopMode::Drain);
+    const auto stopped = controller.stop_publishing();
+    require(stopped.has_value(),
+            stopped ? "publisher must stop" : stopped.error().message);
 
     const auto capture_stats = capture_worker.stats();
     const auto encoder_stats = encoder_worker.stats();
     const auto output_stats = output_worker.stats();
 
-    require(capture_worker.state() == domain::VideoCaptureWorkerState::Idle &&
+    require(controller.state() == app::PublisherControllerState::Idle &&
+                capture_worker.state() == domain::VideoCaptureWorkerState::Idle &&
                 encoder_worker.state() ==
                     domain::VideoEncoderWorkerState::Idle &&
                 output_worker.state() == domain::VideoOutputWorkerState::Idle,
@@ -239,6 +239,9 @@ void synthetic_capture_reaches_a_real_h264_file() {
             "file backend receipts must account for every AU and input byte");
     require(output_stats.flush_calls == 1,
             "normal output drain must flush the file exactly once");
+    require(controller.stats().completed_sessions == 1 &&
+                controller.stats().failed_sessions == 0,
+            "controller must report one completed file-output session");
 
     std::error_code file_size_error;
     const auto file_size = std::filesystem::file_size(
