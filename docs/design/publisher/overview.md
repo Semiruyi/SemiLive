@@ -116,7 +116,7 @@ Publisher 参考 SemiPlayer 已验证的模块风格，并针对首版音视频�
 | 基础设施 | `DefaultNotifier` | `Notifier` 的线程安全进程内实现 |
 | 公共基础设施 | `semilive::log` | 进程级异步日志、滚动文件、控制台输出和故障降级 |
 | 可观测性 | `PublisherControllerStats` | 汇总会话、Worker 和领域资源统计快照 |
-| 装配层 | `PublisherComposition` | 管理进程级模块装配、所有权和逆序释放 |
+| 装配层 | [`PublisherComposition`](publisher-composition.md) | 管理进程级模块装配、所有权和逆序释放 |
 
 ## 4. 依赖关系
 

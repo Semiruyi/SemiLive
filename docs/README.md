@@ -12,6 +12,10 @@
 
 - [Publisher 音视频设计总览](design/publisher/overview.md)：模块、线程、资源、共享时间轴、
   生命周期和测试边界。
+- [PublisherComposition 设计](design/publisher/publisher-composition.md)：进程级对象图、配置、
+  所有权、装配回滚、逆序释放和 Main 边界。
+- [PublisherController 设计](design/publisher/publisher-controller.md)：视频发布会话的启动、
+  Drain、Abort、故障汇聚、状态机和统计。
 - [FrameScheduler 设计](design/publisher/frame-scheduler.md)：视频帧 deadline、媒体时间、
   晚到跳帧及其与 VideoCaptureWorker 的协作。
 - [DesktopCaptureBackend 设计](design/publisher/desktop-capture-backend.md)：桌面输出选择、CPU
@@ -20,6 +24,8 @@
   控制接口、固定帧率采集循环、重复帧、恢复上限和错误传播。
 - [视频编码阶段设计](design/publisher/video-encoding.md)：BGRA 预处理与 H.264 Backend 边界、
   Encoder Worker 线程、AU 背压、Drain/Abort 停止语义和性能演进条件。
+- [视频输出阶段设计](design/publisher/video-output.md)：AU 主输出、Output Worker、
+  H.264 文件 Backend、Drain/Abort 语义和 M2 RTP 扩展边界。
 
 ## 后续文档类型
 
