@@ -9,10 +9,6 @@
 
 namespace semilive::publisher::infra::output {
 
-namespace detail {
-class RtpUdpVideoOutputBackendTestAccess;
-}
-
 struct RtpUdpVideoOutputConfig {
     std::string destination_address;
     std::uint16_t destination_port = 0;
@@ -39,8 +35,6 @@ public:
     void close() noexcept override;
 
 private:
-    friend class detail::RtpUdpVideoOutputBackendTestAccess;
-
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

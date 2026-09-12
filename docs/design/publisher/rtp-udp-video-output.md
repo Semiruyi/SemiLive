@@ -131,8 +131,9 @@ struct RtpUdpVideoOutputConfig {
 错误。
 
 SSRC、初始 sequence 和初始 RTP timestamp 不作为普通用户配置。`open()` 每次新会话通过操作系统
-随机源生成；测试通过 Backend 内部的确定性状态工厂注入固定值。随机源不可用时 `open()` 失败，
-不退化为时间戳、进程号或固定常量。
+随机源生成。Packetizer 单元测试使用固定状态精确验证协议字段；Backend loopback 测试验证随机
+状态在会话内的连续性和一致性，不为生产 Backend 增加测试专用入口。随机源不可用时 `open()`
+失败，不退化为时间戳、进程号或固定常量。
 
 ## 5. Composition、调试记录与 CLI
 
@@ -477,7 +478,8 @@ packetize(access_unit, session_state, emit_datagram)
 - PT、SSRC、网络字节序和固定 RTP Header 字段；
 - 空 AU、畸形 Annex-B 和过小数据报配置失败。
 
-这些测试使用固定 RTP 初始状态，不依赖系统随机数和网络。
+Packetizer 测试使用固定 RTP 初始状态，不依赖系统随机数和网络；Backend loopback 测试使用真实
+系统随机源，只断言序列、timestamp 和 SSRC 的会话内关系。
 
 ### 13.3 Backend 与 UDP loopback
 

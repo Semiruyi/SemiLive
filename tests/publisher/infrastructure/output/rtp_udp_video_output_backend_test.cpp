@@ -1,7 +1,5 @@
 #include <semilive/publisher/infrastructure/output/rtp_udp_video_output_backend.hpp>
 
-#include "rtp_udp_video_output_backend_test_access.hpp"
-
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -32,7 +30,6 @@
 namespace {
 
 namespace contracts = semilive::publisher::contracts::output;
-namespace detail = semilive::publisher::infra::output::detail;
 namespace model = semilive::publisher::model;
 
 using semilive::publisher::infra::output::RtpUdpVideoOutputBackend;
@@ -175,8 +172,6 @@ private:
 void sends_packetized_access_unit_and_reports_udp_receipt() {
     Ipv4LoopbackReceiver receiver;
     RtpUdpVideoOutputBackend backend{{"127.0.0.1", receiver.port(), 96, 18}};
-    detail::RtpUdpVideoOutputBackendTestAccess::set_next_session_state(
-        backend, 65'534, 1000, 0x11223344U);
 
     const auto opened = backend.open();
     require(opened &&
@@ -209,15 +204,18 @@ void sends_packetized_access_unit_and_reports_udp_receipt() {
     require(datagrams[0].size() == 15 && datagrams[1].size() == 18 &&
                 datagrams[2].size() == 18 && datagrams[3].size() == 15,
             "loopback must receive the expected Single NAL and FU-A sizes");
+    const auto first_sequence = read_u16(datagrams[0], 2);
+    const auto first_timestamp = read_u32(datagrams[0], 4);
+    const auto session_ssrc = read_u32(datagrams[0], 8);
     for (std::size_t index = 0; index < datagrams.size(); ++index) {
         require(value(datagrams[index][0]) == 0x80,
                 "backend must emit RTP version 2 without extensions");
         require(read_u16(datagrams[index], 2) ==
-                    static_cast<std::uint16_t>(65'534 + index),
+                    static_cast<std::uint16_t>(first_sequence + index),
                 "backend must preserve continuous RTP sequence numbers");
-        require(read_u32(datagrams[index], 4) == 1090,
-                "backend must map presentation time to a 90 kHz timestamp");
-        require(read_u32(datagrams[index], 8) == 0x11223344U,
+        require(read_u32(datagrams[index], 4) == first_timestamp,
+                "all packets in one AU must share one RTP timestamp");
+        require(read_u32(datagrams[index], 8) == session_ssrc,
                 "backend must preserve one SSRC for the session");
     }
     require((value(datagrams[0][1]) & 0x80U) == 0 &&
@@ -225,6 +223,25 @@ void sends_packetized_access_unit_and_reports_udp_receipt() {
                 (value(datagrams[2][1]) & 0x80U) == 0 &&
                 value(datagrams[3][1]) == 0xe0,
             "only the final RTP packet of the access unit must set Marker");
+
+    const auto next_encoded = access_unit(
+        {std::byte{0x00}, std::byte{0x00}, std::byte{0x01},
+         std::byte{0x61}, std::byte{0x33}, std::byte{0x80}},
+        std::chrono::milliseconds{2});
+    const auto next_consumed = backend.consume(next_encoded);
+    require(next_consumed && next_consumed->emitted_units == 1 &&
+                next_consumed->emitted_bytes == 15,
+            "second AU must emit one complete Single NAL datagram");
+    const auto next_datagram = receiver.receive();
+    require(read_u16(next_datagram, 2) ==
+                static_cast<std::uint16_t>(first_sequence + 4U),
+            "RTP sequence must remain continuous across access units");
+    require(read_u32(next_datagram, 4) - first_timestamp == 90,
+            "one millisecond of media time must advance RTP by 90 ticks");
+    require(read_u32(next_datagram, 8) == session_ssrc,
+            "SSRC must remain stable across access units in one session");
+    require(value(next_datagram[1]) == 0xe0,
+            "single packet second AU must carry the Marker bit");
 
     const auto flushed = backend.flush();
     require(flushed && flushed->emitted_units == 0 &&
@@ -251,8 +268,6 @@ void maps_input_failures_and_requires_close_before_reuse() {
                     contracts::VideoOutputOperation::State,
             "consume while closed must report a state issue");
 
-    detail::RtpUdpVideoOutputBackendTestAccess::set_next_session_state(
-        backend, 1, 2, 3);
     require(backend.open().has_value(), "backend must open for input test");
     const auto empty = backend.consume(
         access_unit({}, std::chrono::nanoseconds{0}));
@@ -267,8 +282,6 @@ void maps_input_failures_and_requires_close_before_reuse() {
             "failed backend must require close before reuse");
     backend.close();
 
-    detail::RtpUdpVideoOutputBackendTestAccess::set_next_session_state(
-        backend, 4, 5, 6);
     require(backend.open().has_value(),
             "closed failed backend must open a new session");
     const auto negative = backend.consume(

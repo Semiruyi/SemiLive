@@ -1,7 +1,6 @@
 #include <semilive/publisher/infrastructure/output/rtp_udp_video_output_backend.hpp>
 
 #include "h264_rtp_packetizer.hpp"
-#include "rtp_udp_video_output_backend_test_access.hpp"
 #include "udp_socket.hpp"
 
 #include <array>
@@ -147,7 +146,6 @@ struct RtpUdpVideoOutputBackend::Impl {
     detail::UdpSocket socket;
     std::unique_ptr<detail::H264RtpPacketizer> packetizer;
     detail::RtpSessionState session;
-    std::optional<detail::RtpSessionState> next_test_session;
     State state = State::Closed;
 };
 
@@ -180,17 +178,12 @@ RtpUdpVideoOutputBackend::Impl::open() {
                                      std::move(opened.error().message))};
     }
 
-    if (next_test_session) {
-        session = *next_test_session;
-        next_test_session.reset();
-    } else {
-        auto random_state = random_session_state();
-        if (!random_state) {
-            socket.close();
-            return std::unexpected{std::move(random_state.error())};
-        }
-        session = *random_state;
+    auto random_state = random_session_state();
+    if (!random_state) {
+        socket.close();
+        return std::unexpected{std::move(random_state.error())};
     }
+    session = *random_state;
 
     packetizer = std::move(new_packetizer);
     state = State::Open;
@@ -280,15 +273,6 @@ RtpUdpVideoOutputBackend::flush() {
 
 void RtpUdpVideoOutputBackend::close() noexcept {
     impl_->close();
-}
-
-void detail::RtpUdpVideoOutputBackendTestAccess::set_next_session_state(
-    RtpUdpVideoOutputBackend& backend,
-    const std::uint16_t next_sequence,
-    const std::uint32_t initial_timestamp,
-    const std::uint32_t ssrc) {
-    backend.impl_->next_test_session =
-        detail::RtpSessionState{next_sequence, initial_timestamp, ssrc};
 }
 
 }  // namespace semilive::publisher::infra::output
