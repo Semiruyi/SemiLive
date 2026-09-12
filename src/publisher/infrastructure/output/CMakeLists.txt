@@ -1,5 +1,7 @@
 add_library(semilive_publisher_infra_output STATIC
+    src/annex_b_nal_splitter.cpp
     src/h264_file_output_backend.cpp
+    src/h264_rtp_packetizer.cpp
 )
 
 add_library(SemiLive::PublisherInfraOutput ALIAS semilive_publisher_infra_output)
