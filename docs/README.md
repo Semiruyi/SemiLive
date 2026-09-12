@@ -25,7 +25,9 @@
 - [视频编码阶段设计](design/publisher/video-encoding.md)：BGRA 预处理与 H.264 Backend 边界、
   Encoder Worker 线程、AU 背压、Drain/Abort 停止语义和性能演进条件。
 - [视频输出阶段设计](design/publisher/video-output.md)：AU 主输出、Output Worker、
-  H.264 文件 Backend、Drain/Abort 语义和 M2 RTP 扩展边界。
+  RTP/UDP 正式主输出、可选文件调试旁路和 Drain/Abort 语义。
+- [RTP/UDP 视频输出 Backend 设计](design/publisher/rtp-udp-video-output.md)：Publisher 的
+  Annex-B NAL 拆分、Single NAL/FU-A、RTP 会话状态、UDP 发送和 Composition 注入。
 
 ## 后续文档类型
 

@@ -7,6 +7,11 @@
 本设计只实现 M1 视频链路：Windows DXGI 桌面采集、FFmpeg/libx264 编码和 H.264
 Annex-B 文件输出。不为尚未实现的音频和 RTP 创建占位对象或通用媒体 Graph。
 
+本文记录已经落地的 M1 对象图。进入 M2 后，正式主输出固定改为
+`RtpUdpVideoOutputBackend`，文件只作为可选调试旁路；对应增量设计见
+[RTP/UDP 视频输出 Backend 设计](rtp-udp-video-output.md)，不把本文的 M1 文件主输出误作目标
+架构。
+
 ## 1. 架构位置
 
 ```mermaid
@@ -130,8 +135,8 @@ Composition 直接复用已有的 `DesktopCaptureConfig` 和 `VideoEncoderConfig
 FrameStore 容量 2 和 AU Queue 容量 4 是当前领域实时策略，不作为 M1 进程公开配置。
 稳定性或性能数据证明需要调整时，再将它们引入内部调优配置。
 
-M2 实现 RTP 后，输出配置再扩展为文件或 RTP 的类型明确 `variant`。现在不引入
-只有一个分支的 variant，也不把具体输出配置下沉到通用 Output Worker 接口。
+M2 实现 RTP 后，输出配置改为必选 `RtpUdpVideoOutputConfig` 和可选调试文件配置，不使用文件或
+RTP 的互斥 `variant`。具体输出配置仍由 Composition 解释，不下沉到通用 Output Worker 接口。
 
 ### 3.1 配置校验边界
 

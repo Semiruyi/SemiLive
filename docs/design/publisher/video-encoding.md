@@ -568,7 +568,7 @@ M1 把文件 Backend 作为 Publisher 的正式主输出，而不是单独的 sm
 30 fps、YUV420P、关键帧间隔与黑边。Output Worker 在写文件前检查应用层
 `presentation_time` 严格单调，因为原始 Annex-B `.h264` 不携带每个 AU 的应用层 PTS，不能靠
 ffprobe 还原验证。运行 30 分钟确认内存不持续增长，并记录预处理、编码、FrameStore 替换、
-实际码率和采集到输出延迟。主输出 Backend、M2 RTP 替换和可选诊断 Recorder 的区别见
+实际码率和采集到输出延迟。RTP 正式主输出和可选文件调试 Recorder 的区别见
 [视频输出阶段设计](video-output.md)。
 
 ## 11. 实现顺序

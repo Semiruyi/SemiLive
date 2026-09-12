@@ -22,7 +22,7 @@ RTP 或 UDP；输出阶段是该 Queue 的唯一消费者。
 - 清空 AU Queue；该能力只属于 Controller 持有的 Control 接口；
 - 把文件路径、网络地址、Winsock 或 RTP 类型暴露给 `VideoOutputWorker`；
 - 在一个 Queue 上注册多个竞争消费者；
-- 把 M2 的可选诊断文件记录伪装成第二个主输出。
+- 把可选调试文件记录伪装成第二个主输出。
 
 主输出的最小数据流为：
 
@@ -30,12 +30,15 @@ RTP 或 UDP；输出阶段是该 Queue 的唯一消费者。
 EncodedVideoAccessUnitQueue
 -> VideoOutputWorker
 -> VideoAccessUnitOutputBackend
-   M1: H264FileOutputBackend
-   M2: H264RtpOutputBackend -> DatagramSink
+-> RtpUdpVideoOutputBackend -> UDP 主输出
+                              +-> optional H264FileRecorder
+                                  -> .h264 调试文件
 ```
 
-每个已启用的视频轨道一次会话恰好选择一个主输出 Backend。M1 的文件输出和 M2 的 RTP 输出
-都参与发布正确性：主输出失败会使会话失败，主输出变慢会通过 AU Queue 向编码阶段传播背压。
+每个已启用的视频轨道一次会话恰好只有一个主输出 Backend。目标运行时固定使用 RTP/UDP 主输出：
+RTP 失败会使会话失败，RTP 变慢会通过 AU Queue 向编码阶段传播背压。文件只作为可选调试旁路，
+不得成为第二个主输出，也不得影响发布会话结果。M1 曾使用文件 Backend 验证编码闭环，该实现
+继续保留用于隔离测试。
 
 ## 2. 为什么 Worker 与 Backend 分离
 
@@ -52,7 +55,7 @@ Drain/Abort、通知订阅和错误传播只实现一次。
 - 可以在 Worker 线程内打开、消费、排空和关闭。
 
 如果未来输出方式不满足这些条件，不扩张本接口去容纳所有行为，而是为它设计独立 Worker 或
-异步边界。尤其是 M2 的 best-effort 诊断 Recorder 不属于主输出 Backend。
+异步边界。尤其是 best-effort 调试 Recorder 不属于主输出 Backend。
 
 ## 3. Backend 契约
 
@@ -238,8 +241,8 @@ Controller 清理残留 AU。Output Worker 不持有 Queue Control 接口，从�
 - `close()` 幂等关闭文件，不抛异常；
 - 不创建目录，不覆盖路径配置语义，不解析 H.264 NAL。
 
-M1 文件是发布会话的主输出，不是诊断旁路。因此文件无法打开或写入失败会使整个发布会话
-失败，磁盘写入变慢也允许通过 AU Queue 产生背压。这样正常启动 `semilive_publisher` 就能完成：
+M1 阶段文件曾是发布会话的主输出，不是诊断旁路；当时文件无法打开或写入失败会使整个发布
+会话失败，磁盘写入变慢也允许通过 AU Queue 产生背压。它完成了以下编码闭环验证：
 
 ```text
 DXGI -> Capture Worker -> Encoder Worker -> Output Worker
@@ -249,31 +252,33 @@ DXGI -> Capture Worker -> Encoder Worker -> Output Worker
 原始 Annex-B `.h264` 不保存每个 AU 的应用层 PTS。Output Worker 在消费时仍检查并统计 PTS 与
 source sequence 单调性；生成文件通过 `ffprobe` 和 `ffplay -framerate 30` 做外部可解码性验证。
 
-## 7. M2 H264RtpOutputBackend
+## 7. M2 RtpUdpVideoOutputBackend
 
 M2 保留同一个 `VideoOutputWorker` 和 AU Queue，只在 Composition 中替换主输出 Backend。
-`H264RtpOutputBackend` 组合：
+`RtpUdpVideoOutputBackend` 是 infrastructure 实现，内部组合：
 
 ```text
-H264NalSplitter
+AnnexBNalSplitter
 -> H264RtpPacketizer
--> DatagramSink
+-> UdpSocket
 ```
 
-它负责 RTP 轨道状态、90 kHz 时间戳映射、序列号、SSRC、Marker、Single NAL、FU-A 和发送
-receipt；`DatagramSink` 仍只理解完整数据报，不理解 H.264。Packetizer 保持可独立单元测试。
+它负责 RTP 轨道状态、90 kHz 时间戳映射、序列号、SSRC、Marker、Single NAL、FU-A、UDP
+Socket 和发送 receipt。Splitter、Packetizer 与 Socket 可以保持为 Backend 模块内部的可测试组件，
+但首版不增加跨层 `DatagramSink` 契约，也不把 RTP 输出实现放入 Domain。完整协议和生命周期规则见
+[RTP/UDP 视频输出 Backend 设计](rtp-udp-video-output.md)。
 
 如果实现过程中发现 RTP 需要异步发送、RTCP 控制、重传或与同步 AU 消费明显不同的生命周期，
 不向通用 Backend 强塞这些行为；届时重新评估是否恢复独立 `VideoRtpSenderWorker`。首版无 RTCP、
 重传和拥塞控制，满足当前 Backend 边界。
 
-## 8. M2 可选诊断 Recorder
+## 8. 可选调试文件 Recorder
 
-M2 同时启用 RTP 和 `.h264` 诊断记录时，不能让两个消费者从同一个 AU Queue 竞争。RTP 主输出
+调试时同时启用 RTP 和 `.h264` 记录，不能让两个消费者从同一个 AU Queue 竞争。RTP 主输出
 Backend 在处理 AU 时向独立 `H264FileRecorder` 提交一份 Annex-B 数据副本：
 
 ```text
-AU Queue -> VideoOutputWorker -> H264RtpOutputBackend -> UDP
+AU Queue -> VideoOutputWorker -> RtpUdpVideoOutputBackend -> UDP
                                   |
                                   +-> best-effort diagnostic copy
                                       -> bounded recorder queue -> file
@@ -284,9 +289,10 @@ Recorder 的提交必须非阻塞，过载或写入失败只停止本次诊断�
 
 ## 9. Composition 与会话顺序
 
-`PublisherConfig` 首版选择文件主输出，Composition 构造 `H264FileOutputBackend` 并注入
-`DefaultVideoOutputWorker`。M2 配置选择 RTP 时，Composition 改为构造 RTP Backend；一次轨道
-不能同时选择两个主输出。
+目标 `PublisherConfig` 包含必选 RTP/UDP 配置和可选调试文件配置。Composition 始终构造
+`RtpUdpVideoOutputBackend` 并注入 `DefaultVideoOutputWorker`；启用调试文件时额外构造
+`H264FileRecorder`，由 RTP Backend 独占拥有并非阻塞提交 AU 副本。一次轨道仍只有 RTP 一个
+主输出。
 
 消费者到生产者的启动顺序：
 
@@ -347,13 +353,13 @@ PublisherContracts
 
 PublisherDomain
   VideoOutputWorker / DefaultVideoOutputWorker
-  M2 H264RtpOutputBackend + H264NalSplitter + H264RtpPacketizer
 
 PublisherInfraOutput
   H264FileOutputBackend
-
-PublisherInfraTransport
-  M2 UdpDatagramSink / MemoryDatagramSink
+  M2 RtpUdpVideoOutputBackend
+      + AnnexBNalSplitter
+      + H264RtpPacketizer
+      + UdpSocket
 
 PublisherInfrastructure (INTERFACE aggregate)
   + PublisherInfraOutput
@@ -364,14 +370,13 @@ PublisherInfrastructure (INTERFACE aggregate)
 ```text
 PublisherDomain -> PublisherContracts + PublisherModel
 PublisherInfraOutput -> PublisherContracts + PublisherModel
-PublisherInfraTransport -> PublisherContracts
-Composition -> PublisherDomain + PublisherInfraOutput + PublisherInfraTransport
+Composition -> PublisherDomain + PublisherInfraOutput
 ```
 
 文件 Backend 不依赖 Domain，Output Worker 不依赖 Infra。测试分别链接精确 target，不能通过
 `PublisherCore` 或 `PublisherInfrastructure` 聚合目标获得意外 include 可见性。M2 的
-`H264RtpOutputBackend` 与 Packetizer 属于 Domain：它只依赖两个契约接口，不包含具体 socket；
-Composition 把 Infra 的 `DatagramSink` 实现注入它，因此不产生 Infra 反向依赖 Domain。
+`RtpUdpVideoOutputBackend`、Packetizer 和 Socket 都属于 Infra Output；只有 Backend 公开实现
+`VideoAccessUnitOutputBackend`，其余类型保持模块私有，因此不会把 RTP/UDP 反向泄漏到 Domain。
 
 ## 12. 测试与验收
 
@@ -397,14 +402,16 @@ Composition 把 Infra 的 `DatagramSink` 实现注入它，因此不产生 Infra
 
 ### 12.3 应用闭环
 
-正常运行 `semilive_publisher`，默认以 DXGI、libx264 和文件主输出装配。Ctrl+C 后验证：
+正常运行 `semilive_publisher`，以 DXGI、libx264 和 RTP/UDP 主输出装配；需要调试时额外开启
+`.h264` Recorder。Ctrl+C 后验证：
 
 - Worker 均按顺序回到 Idle；
 - FrameStore 和 AU Queue 为空；
-- 文件非空且统计中的输出字节数与文件大小一致；
+- RTP 数据报可被 loopback Receiver 或标准分析工具接收；
+- 启用调试记录时文件非空，Recorder 失败不影响 RTP 会话结果；
 - PTS 和 source sequence 在应用内严格递增；
-- `ffprobe` 识别 H.264、1920x1080、YUV420P；
-- `ffplay -framerate 30` 可以连续播放，画面比例、鼠标和关键帧恢复正常。
+- Receiver 重组或调试文件可由 `ffprobe` 识别为 H.264、1920x1080、YUV420P；
+- 重组码流或调试文件可连续播放，画面比例、鼠标和关键帧恢复正常。
 
 DXGI 和播放器验证是 Windows 手动验收，不注册为普通无设备 CTest。Synthetic + FFmpeg +
 File Backend 的完整链路继续作为自动化 integration test。
@@ -417,9 +424,9 @@ File Backend 的完整链路继续作为自动化 integration test。
 4. 扩展无设备链路到真实文件 Backend；
 5. 实现首版 Composition、Controller 和 Publisher 文件输出配置；
 6. 正常启动应用完成 DXGI 到 `.h264` 的 M1 验收；
-7. 实现 NAL Splitter、RTP Packetizer、DatagramSink 和 RTP Backend；
-8. Composition 从文件主输出切换为 RTP 主输出；
-9. 需要同时诊断时再增加独立 best-effort `H264FileRecorder`。
+7. 实现 NAL Splitter、RTP Packetizer、UDP Socket 和 `RtpUdpVideoOutputBackend`；
+8. Composition 固定使用 RTP 主输出；
+9. 增加独立 best-effort `H264FileRecorder` 作为可选调试旁路。
 
 ## 14. 已决定
 
@@ -428,8 +435,8 @@ File Backend 的完整链路继续作为自动化 integration test。
 - 具体输出行为由 `VideoAccessUnitOutputBackend` 隔离；
 - Backend 同步消费一个完整 AU，不保存引用；
 - 具体 Backend 配置在 Composition 构造时注入，不进入通用 Worker 配置；
-- M1 的 `H264FileOutputBackend` 是正式主输出，失败会终止会话并参与背压；
-- M2 复用 Output Worker，主输出替换为 RTP Backend；
-- M2 的可选诊断 Recorder 是独立、异步、best-effort 旁路，不实现主输出 Backend；
+- M1 的 `H264FileOutputBackend` 保留为历史验收和隔离测试能力，不进入目标 Composition；
+- 目标运行时复用 Output Worker，正式主输出固定为 infra 的 `RtpUdpVideoOutputBackend`；
+- 可选文件 Recorder 是独立、异步、best-effort 调试旁路，不实现主输出 Backend；
 - 正常停止按 Capture、Encoder Drain、Output Drain 排空；故障停止使用 Abort；
 - 如果 RTP 后续不再满足同步 AU Backend 约束，重新拆出专用 Sender Worker，不污染当前契约。
