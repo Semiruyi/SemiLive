@@ -26,3 +26,24 @@ add_test(
     NAME semilive_publisher_h264_rtp_packetizer
     COMMAND semilive_publisher_h264_rtp_packetizer_test
 )
+
+add_executable(semilive_publisher_udp_socket_test
+    udp_socket_test.cpp
+)
+target_include_directories(semilive_publisher_udp_socket_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/publisher/infrastructure/output/src
+)
+target_link_libraries(semilive_publisher_udp_socket_test PRIVATE
+    SemiLive::PublisherInfraOutput
+)
+if(WIN32)
+    target_link_libraries(semilive_publisher_udp_socket_test PRIVATE
+        ws2_32
+    )
+endif()
+semilive_enable_warnings(semilive_publisher_udp_socket_test)
+
+add_test(
+    NAME semilive_publisher_udp_socket
+    COMMAND semilive_publisher_udp_socket_test
+)
