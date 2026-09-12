@@ -2,6 +2,7 @@ add_library(semilive_publisher_infra_output STATIC
     src/annex_b_nal_splitter.cpp
     src/h264_file_output_backend.cpp
     src/h264_rtp_packetizer.cpp
+    src/rtp_udp_video_output_backend.cpp
     src/udp_socket.cpp
 )
 
@@ -16,6 +17,7 @@ target_link_libraries(semilive_publisher_infra_output PUBLIC
 )
 if(WIN32)
     target_link_libraries(semilive_publisher_infra_output PRIVATE
+        bcrypt
         ws2_32
     )
 endif()

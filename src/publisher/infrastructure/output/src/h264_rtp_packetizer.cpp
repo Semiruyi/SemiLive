@@ -63,7 +63,16 @@ void write_rtp_header(std::vector<std::byte>& datagram,
     append_u32(datagram, ssrc);
 }
 
-[[nodiscard]] std::expected<void, std::string> validate_config(
+}  // namespace
+
+H264RtpPacketizer::H264RtpPacketizer(H264RtpPacketizerConfig config)
+    : config_{config} {
+    if (validate_h264_rtp_packetizer_config(config_)) {
+        datagram_.reserve(config_.max_datagram_bytes);
+    }
+}
+
+std::expected<void, std::string> validate_h264_rtp_packetizer_config(
     const H264RtpPacketizerConfig& config) {
     if (config.payload_type < 96 || config.payload_type > 127) {
         return std::unexpected{
@@ -80,19 +89,14 @@ void write_rtp_header(std::vector<std::byte>& datagram,
     return {};
 }
 
-}  // namespace
-
-H264RtpPacketizer::H264RtpPacketizer(H264RtpPacketizerConfig config)
-    : config_{config} {
-    datagram_.reserve(config.max_datagram_bytes);
-}
-
 RtpPacketizationResult H264RtpPacketizer::packetize(
     const std::span<const std::byte> annex_b,
     const std::chrono::nanoseconds presentation_time,
     RtpSessionState& session,
     const RtpDatagramEmitter& emit_datagram) {
-    if (const auto valid_config = validate_config(config_); !valid_config) {
+    if (const auto valid_config =
+            validate_h264_rtp_packetizer_config(config_);
+        !valid_config) {
         return std::unexpected{valid_config.error()};
     }
     if (presentation_time < std::chrono::nanoseconds::zero()) {

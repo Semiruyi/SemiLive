@@ -33,6 +33,9 @@ using RtpDatagramEmitter =
 using RtpPacketizationResult =
     std::expected<RtpPacketizationReceipt, std::string>;
 
+[[nodiscard]] std::expected<void, std::string>
+validate_h264_rtp_packetizer_config(const H264RtpPacketizerConfig& config);
+
 class H264RtpPacketizer {
 public:
     explicit H264RtpPacketizer(H264RtpPacketizerConfig config);
