@@ -60,18 +60,27 @@ void print_help() {
         << "SemiLive desktop video publisher\n"
            "Usage: semilive_publisher [options]\n\n"
            "Options:\n"
-           "  --output PATH       Write Annex-B H.264 to PATH\n"
-           "                      (default: semilive.h264)\n"
-           "  --display TARGET    Capture primary or zero-based display INDEX\n"
-           "                      (default: primary)\n"
-           "  --no-pointer        Do not compose the mouse pointer\n"
-           "  --help              Show this help\n"
-           "  --version           Show the version\n";
+           "  --rtp-address ADDRESS             RTP destination IPv4 or IPv6\n"
+           "                                    address (required)\n"
+           "  --rtp-port PORT                   RTP destination UDP port\n"
+           "                                    (required, 1..65535)\n"
+           "  --rtp-payload-type PT             Dynamic RTP payload type\n"
+           "                                    (default: 96)\n"
+           "  --rtp-max-datagram-bytes SIZE     Maximum UDP payload bytes\n"
+           "                                    (default: 1200)\n"
+           "  --display TARGET                  Capture primary or zero-based\n"
+           "                                    display INDEX (default: primary)\n"
+           "  --no-pointer                      Do not compose the mouse pointer\n"
+           "  --help                            Show this help\n"
+           "  --version                         Show the version\n";
 }
 
 CommandLineResult parse_command_line(const int argc, char* argv[]) {
     CommandLineOptions options;
-    bool output_set = false;
+    bool rtp_address_set = false;
+    bool rtp_port_set = false;
+    bool rtp_payload_type_set = false;
+    bool rtp_max_datagram_bytes_set = false;
     bool display_set = false;
     bool pointer_disabled = false;
 
@@ -89,15 +98,94 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
             return options;
         }
 
-        if (argument == "--output") {
-            if (output_set) {
-                return std::unexpected{"--output may only be specified once"};
+        if (argument == "--rtp-address") {
+            if (rtp_address_set) {
+                return std::unexpected{
+                    "--rtp-address may only be specified once"};
             }
             if (++index >= argc) {
-                return std::unexpected{"--output requires a path"};
+                return std::unexpected{"--rtp-address requires an address"};
             }
-            options.publisher.output.path = argv[index];
-            output_set = true;
+            const std::string_view address{argv[index]};
+            if (address.empty()) {
+                return std::unexpected{"--rtp-address requires an address"};
+            }
+            options.publisher.output.rtp_udp.destination_address = address;
+            rtp_address_set = true;
+            continue;
+        }
+
+        if (argument == "--rtp-port") {
+            if (rtp_port_set) {
+                return std::unexpected{
+                    "--rtp-port may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{"--rtp-port requires a value"};
+            }
+            const std::string_view text{argv[index]};
+            std::uint32_t port = 0;
+            const auto parsed =
+                std::from_chars(text.data(), text.data() + text.size(), port);
+            if (parsed.ec != std::errc{} ||
+                parsed.ptr != text.data() + text.size() || port == 0 ||
+                port > 65'535) {
+                return std::unexpected{
+                    "--rtp-port requires an integer in 1..65535"};
+            }
+            options.publisher.output.rtp_udp.destination_port =
+                static_cast<std::uint16_t>(port);
+            rtp_port_set = true;
+            continue;
+        }
+
+        if (argument == "--rtp-payload-type") {
+            if (rtp_payload_type_set) {
+                return std::unexpected{
+                    "--rtp-payload-type may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{
+                    "--rtp-payload-type requires a value"};
+            }
+            const std::string_view text{argv[index]};
+            std::uint32_t payload_type = 0;
+            const auto parsed = std::from_chars(
+                text.data(), text.data() + text.size(), payload_type);
+            if (parsed.ec != std::errc{} ||
+                parsed.ptr != text.data() + text.size() ||
+                payload_type < 96 || payload_type > 127) {
+                return std::unexpected{
+                    "--rtp-payload-type requires an integer in 96..127"};
+            }
+            options.publisher.output.rtp_udp.payload_type =
+                static_cast<std::uint8_t>(payload_type);
+            rtp_payload_type_set = true;
+            continue;
+        }
+
+        if (argument == "--rtp-max-datagram-bytes") {
+            if (rtp_max_datagram_bytes_set) {
+                return std::unexpected{
+                    "--rtp-max-datagram-bytes may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{
+                    "--rtp-max-datagram-bytes requires a value"};
+            }
+            const std::string_view text{argv[index]};
+            std::uint32_t max_datagram_bytes = 0;
+            const auto parsed = std::from_chars(
+                text.data(), text.data() + text.size(), max_datagram_bytes);
+            if (parsed.ec != std::errc{} ||
+                parsed.ptr != text.data() + text.size() ||
+                max_datagram_bytes < 15 || max_datagram_bytes > 65'507) {
+                return std::unexpected{
+                    "--rtp-max-datagram-bytes requires an integer in 15..65507"};
+            }
+            options.publisher.output.rtp_udp.max_datagram_bytes =
+                max_datagram_bytes;
+            rtp_max_datagram_bytes_set = true;
             continue;
         }
 
@@ -145,6 +233,18 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
                                std::string{argument}};
     }
 
+    if (!rtp_address_set && !rtp_port_set) {
+        return std::unexpected{
+            "--rtp-address and --rtp-port are required"};
+    }
+    if (!rtp_address_set) {
+        return std::unexpected{
+            "--rtp-address is required when --rtp-port is specified"};
+    }
+    if (!rtp_port_set) {
+        return std::unexpected{
+            "--rtp-port is required when --rtp-address is specified"};
+    }
     return options;
 }
 

@@ -9,7 +9,7 @@
 #include <semilive/publisher/domain/worker/video_output_worker/default_video_output_worker.hpp>
 #include <semilive/publisher/infrastructure/ffmpeg/video_encoder/ffmpeg_h264_encoder_backend.hpp>
 #include <semilive/publisher/infrastructure/notifier/default_notifier.hpp>
-#include <semilive/publisher/infrastructure/output/h264_file_output_backend.hpp>
+#include <semilive/publisher/infrastructure/output/rtp_udp_video_output_backend.hpp>
 
 #if defined(_WIN32)
 #include <semilive/publisher/infrastructure/capture/dxgi_desktop_capture_backend.hpp>
@@ -85,10 +85,27 @@ PublisherCompositionResult PublisherComposition::Impl::assemble() {
             PublisherCompositionOperation::Control,
             "disposed publisher composition cannot be assembled")};
     }
-    if (config_.output.path.empty()) {
+    const auto& rtp = config_.output.rtp_udp;
+    if (rtp.destination_address.empty()) {
         return std::unexpected{make_issue(
             PublisherCompositionOperation::ValidateConfig,
-            "publisher H.264 output path must not be empty")};
+            "publisher RTP destination address must not be empty")};
+    }
+    if (rtp.destination_port == 0) {
+        return std::unexpected{make_issue(
+            PublisherCompositionOperation::ValidateConfig,
+            "publisher RTP destination port must not be zero")};
+    }
+    if (rtp.payload_type < 96 || rtp.payload_type > 127) {
+        return std::unexpected{make_issue(
+            PublisherCompositionOperation::ValidateConfig,
+            "publisher RTP payload type must be in the dynamic range 96..127")};
+    }
+    if (rtp.max_datagram_bytes < 15 ||
+        rtp.max_datagram_bytes > 65'507) {
+        return std::unexpected{make_issue(
+            PublisherCompositionOperation::ValidateConfig,
+            "publisher RTP maximum datagram size must be in 15..65507")};
     }
     if (config_.video.recovery_timeout <=
         std::chrono::milliseconds::zero()) {
@@ -114,8 +131,13 @@ PublisherCompositionResult PublisherComposition::Impl::assemble() {
 
         operation = PublisherCompositionOperation::CreateOutputWorker;
         output_worker_ = std::make_unique<domain::DefaultVideoOutputWorker>(
-            std::make_unique<infra::output::H264FileOutputBackend>(
-                config_.output.path),
+            std::make_unique<infra::output::RtpUdpVideoOutputBackend>(
+                infra::output::RtpUdpVideoOutputConfig{
+                    rtp.destination_address,
+                    rtp.destination_port,
+                    rtp.payload_type,
+                    rtp.max_datagram_bytes,
+                }),
             *access_unit_queue_, notifier_);
 
         operation = PublisherCompositionOperation::CreateEncoderWorker;

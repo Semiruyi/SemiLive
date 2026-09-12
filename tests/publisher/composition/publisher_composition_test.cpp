@@ -20,22 +20,47 @@ void require(const bool condition, const std::string_view message) {
     }
 }
 
-void invalid_output_path_is_rejected_before_assembly() {
+[[nodiscard]] composition::PublisherConfig valid_config() {
     composition::PublisherConfig config;
-    config.output.path.clear();
-    composition::PublisherComposition graph{std::move(config)};
+    config.output.rtp_udp.destination_address = "127.0.0.1";
+    config.output.rtp_udp.destination_port = 5004;
+    return config;
+}
 
-    const auto result = graph.assemble();
-    require(!result, "empty output path must fail composition assembly");
-    require(result.error().operation ==
-                composition::PublisherCompositionOperation::ValidateConfig,
-            "empty output path must report config validation");
-    require(graph.controller() == nullptr,
-            "failed composition must not expose a controller");
+void invalid_rtp_output_is_rejected_before_assembly() {
+    const auto check_invalid = [](composition::PublisherConfig config,
+                                  const std::string_view message) {
+        composition::PublisherComposition graph{std::move(config)};
+        const auto result = graph.assemble();
+        require(!result, message);
+        require(result.error().operation ==
+                    composition::PublisherCompositionOperation::ValidateConfig,
+                "invalid RTP output must report config validation");
+        require(graph.controller() == nullptr,
+                "failed composition must not expose a controller");
+    };
+
+    check_invalid(composition::PublisherConfig{},
+                  "empty RTP endpoint must fail composition assembly");
+
+    auto zero_port = valid_config();
+    zero_port.output.rtp_udp.destination_port = 0;
+    check_invalid(std::move(zero_port),
+                  "zero RTP port must fail composition assembly");
+
+    auto static_payload_type = valid_config();
+    static_payload_type.output.rtp_udp.payload_type = 95;
+    check_invalid(std::move(static_payload_type),
+                  "static RTP payload type must fail composition assembly");
+
+    auto small_datagram = valid_config();
+    small_datagram.output.rtp_udp.max_datagram_bytes = 14;
+    check_invalid(std::move(small_datagram),
+                  "undersized RTP datagram must fail composition assembly");
 }
 
 void invalid_recovery_timeout_is_rejected_before_assembly() {
-    composition::PublisherConfig config;
+    auto config = valid_config();
     config.video.recovery_timeout = std::chrono::milliseconds::zero();
     composition::PublisherComposition graph{std::move(config)};
 
@@ -67,13 +92,13 @@ void dispose_before_assembly_is_idempotent_and_terminal() {
 
 #if defined(_WIN32)
 void windows_composition_assembles_an_idle_video_graph() {
-    composition::PublisherComposition graph{composition::PublisherConfig{}};
+    composition::PublisherComposition graph{valid_config()};
     require(graph.controller() == nullptr,
             "unassembled composition must not expose a controller");
 
     const auto assembled = graph.assemble();
     require(assembled.has_value(),
-            "default Windows publisher composition must assemble");
+            "valid Windows publisher composition must assemble");
     require(graph.controller() != nullptr,
             "assembled composition must expose its controller");
     require(graph.controller()->state() == app::PublisherControllerState::Idle,
@@ -94,7 +119,7 @@ void windows_composition_assembles_an_idle_video_graph() {
 }
 
 void const_composition_exposes_const_controller_access() {
-    composition::PublisherComposition graph{composition::PublisherConfig{}};
+    composition::PublisherComposition graph{valid_config()};
     require(graph.assemble().has_value(),
             "composition must assemble for const access test");
 
@@ -106,7 +131,7 @@ void const_composition_exposes_const_controller_access() {
 }
 #else
 void non_windows_composition_reports_platform_error() {
-    composition::PublisherComposition graph{composition::PublisherConfig{}};
+    composition::PublisherComposition graph{valid_config()};
 
     const auto result = graph.assemble();
     require(!result, "non-Windows production composition must not assemble");
@@ -124,7 +149,7 @@ void non_windows_composition_reports_platform_error() {
 
 int main() {
     try {
-        invalid_output_path_is_rejected_before_assembly();
+        invalid_rtp_output_is_rejected_before_assembly();
         invalid_recovery_timeout_is_rejected_before_assembly();
         dispose_before_assembly_is_idempotent_and_terminal();
 #if defined(_WIN32)

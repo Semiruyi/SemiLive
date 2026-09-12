@@ -4,7 +4,9 @@
 #include <semilive/publisher/contracts/encoder/video_encoder_backend.hpp>
 
 #include <chrono>
-#include <filesystem>
+#include <cstddef>
+#include <cstdint>
+#include <string>
 
 namespace semilive::publisher::composition {
 
@@ -14,13 +16,20 @@ struct PublisherVideoConfig {
     contracts::encoder::VideoEncoderConfig encoder;
 };
 
-struct PublisherH264FileOutputConfig {
-    std::filesystem::path path{"semilive.h264"};
+struct RtpUdpVideoOutputConfig {
+    std::string destination_address;
+    std::uint16_t destination_port = 0;
+    std::uint8_t payload_type = 96;
+    std::size_t max_datagram_bytes = 1200;
+};
+
+struct PublisherVideoOutputConfig {
+    RtpUdpVideoOutputConfig rtp_udp;
 };
 
 struct PublisherConfig {
     PublisherVideoConfig video;
-    PublisherH264FileOutputConfig output;
+    PublisherVideoOutputConfig output;
 };
 
 }  // namespace semilive::publisher::composition

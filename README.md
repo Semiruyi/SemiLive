@@ -7,11 +7,11 @@ SemiLive 是一个正在开发的 C++23 实时音视频项目，目标是完成�
 
 ## 当前状态
 
-项目已经完成 Publisher 视频采集、H.264 编码、文件输出、会话 Controller 和进程组合根，
-Windows Publisher 已接通 DXGI、FFmpeg/libx264 到 Annex-B `.h264` 文件的可运行链路。
-网络传输、Receiver 和 Relay 尚未形成可运行闭环：
+项目已经完成 Publisher 视频采集、H.264 编码、RTP/UDP 输出、会话 Controller 和进程组合根。
+Windows Publisher 已接通 DXGI、FFmpeg/libx264、H.264 RTP 封包和 UDP 发送链路。
+Receiver 和 Relay 尚未形成可运行闭环：
 
-- `semilive_publisher`：采集 Windows 桌面并输出 H.264 文件；
+- `semilive_publisher`：采集 Windows 桌面并向指定 UDP endpoint 发送 H.264 RTP；
 - `semilive_relay`：Linux 转发端占位程序；
 - `semilive_receiver`：接收端占位程序。
 
@@ -81,11 +81,13 @@ cmake --build --preset linux-debug
 ctest --preset linux-debug
 ```
 
-查看 Publisher 参数并启动桌面录制；按 Ctrl+C 正常排空编码和文件输出后退出：
+查看 Publisher 参数并启动桌面发布；按 Ctrl+C 正常排空编码和 RTP 输出后退出：
 
 ```sh
 ./build/windows-debug/bin/semilive_publisher.exe --help
-./build/windows-debug/bin/semilive_publisher.exe --output semilive.h264
+./build/windows-debug/bin/semilive_publisher.exe \
+  --rtp-address 127.0.0.1 \
+  --rtp-port 5004
 ```
 
 Relay 和 Receiver 目前仍是占位程序：

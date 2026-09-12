@@ -4,13 +4,10 @@
 `PublisherComposition` 是进程级对象图所有者：它创建、注入、持有并逆序释放 Publisher
 模块，但不参与运行期媒体处理，也不替代 `PublisherController` 的会话编排职责。
 
-本设计只实现 M1 视频链路：Windows DXGI 桌面采集、FFmpeg/libx264 编码和 H.264
-Annex-B 文件输出。不为尚未实现的音频和 RTP 创建占位对象或通用媒体 Graph。
-
-本文记录已经落地的 M1 对象图。进入 M2 后，正式主输出固定改为
-`RtpUdpVideoOutputBackend`，文件只作为可选调试旁路；对应增量设计见
-[RTP/UDP 视频输出 Backend 设计](rtp-udp-video-output.md)，不把本文的 M1 文件主输出误作目标
-架构。
+当前对象图实现 M2 视频链路：Windows DXGI 桌面采集、FFmpeg/libx264 编码和
+`RtpUdpVideoOutputBackend` 主输出。不为尚未实现的音频创建占位对象或通用媒体 Graph。
+M1 的 `H264FileOutputBackend` 仅保留为历史验收和隔离测试能力；可选调试文件旁路属于后续增量。
+RTP 输出细节见 [RTP/UDP 视频输出 Backend 设计](rtp-udp-video-output.md)。
 
 ## 1. 架构位置
 
@@ -34,7 +31,7 @@ flowchart TB
 
     Capture -->|独占拥有| Dxgi[DxgiDesktopCaptureBackend]
     Encoder -->|独占拥有| Ffmpeg[FfmpegH264EncoderBackend]
-    Output -->|独占拥有| File[H264FileOutputBackend]
+    Output -->|独占拥有| Rtp[RtpUdpVideoOutputBackend]
 
     Capture --> FrameStore
     FrameStore --> Encoder
@@ -52,7 +49,7 @@ flowchart TB
   输出最终统计和退出码；
 - Composition 把进程配置转换为一个固定对象图，管理其进程级生命周期；
 - Controller 在已存在的对象图上编排可重复的发布会话；
-- Worker 执行媒体阶段，Backend 实现 DXGI、FFmpeg 和文件系统等外部能力。
+- Worker 执行媒体阶段，Backend 实现 DXGI、FFmpeg、RTP 和 UDP 等外部能力。
 
 Composition 不实现通用依赖注入容器、Backend 注册表或运行期服务定位器。首版
 只显式构造一条类型明确的视频链路。
@@ -106,7 +103,7 @@ Composition 不依赖 `SemiLive::CommonLog`。装配和释放错误通过结果�
 
 ## 3. 进程配置
 
-M1 使用类型明确的视频和 H.264 文件输出配置：
+当前使用类型明确的视频和 RTP/UDP 输出配置：
 
 ```cpp
 namespace semilive::publisher::composition {
@@ -117,13 +114,20 @@ struct PublisherVideoConfig {
     contracts::encoder::VideoEncoderConfig encoder{};
 };
 
-struct PublisherH264FileOutputConfig {
-    std::filesystem::path path{"semilive.h264"};
+struct RtpUdpVideoOutputConfig {
+    std::string destination_address;
+    std::uint16_t destination_port = 0;
+    std::uint8_t payload_type = 96;
+    std::size_t max_datagram_bytes = 1200;
+};
+
+struct PublisherVideoOutputConfig {
+    RtpUdpVideoOutputConfig rtp_udp;
 };
 
 struct PublisherConfig {
     PublisherVideoConfig video;
-    PublisherH264FileOutputConfig output;
+    PublisherVideoOutputConfig output;
 };
 
 }  // namespace semilive::publisher::composition
@@ -132,22 +136,24 @@ struct PublisherConfig {
 Composition 直接复用已有的 `DesktopCaptureConfig` 和 `VideoEncoderConfig`，不重复定义媒体
 值类型。采集和编码只使用 `encoder.frame_rate` 这一个帧率来源。
 
-FrameStore 容量 2 和 AU Queue 容量 4 是当前领域实时策略，不作为 M1 进程公开配置。
+FrameStore 容量 2 和 AU Queue 容量 4 是当前领域实时策略，不作为进程公开配置。
 稳定性或性能数据证明需要调整时，再将它们引入内部调优配置。
 
-M2 实现 RTP 后，输出配置改为必选 `RtpUdpVideoOutputConfig` 和可选调试文件配置，不使用文件或
-RTP 的互斥 `variant`。具体输出配置仍由 Composition 解释，不下沉到通用 Output Worker 接口。
+具体输出配置由 Composition 转换为 infrastructure Backend 配置，不下沉到通用 Output Worker
+接口。后续增加调试文件时，它仍是 RTP Backend 的可选旁路，不增加文件/RTP 互斥 `variant`。
 
 ### 3.1 配置校验边界
 
 Composition 在创建对象前校验进程级和跨模块不变式，包括：
 
-- 输出路径不得为空；
+- RTP 目的地址不得为空，目的端口不得为零；
+- RTP Payload Type 必须在动态范围 `96..127`；
+- 最大数据报大小必须在 `15..65507`；
 - recovery timeout 必须为正值；
-- M1 必须启用唯一的视频轨道和唯一的文件主输出；
+- 必须启用唯一的视频轨道和唯一的 RTP/UDP 主输出；
 - 当前平台必须存在可用的生产采集 Backend。
 
-编码器可接受值、DXGI 输出选择和文件可打开性继续由对应 Backend 在会话启动时校验，
+编码器可接受值、DXGI 输出选择、数值 IP 地址和 Socket 可打开性继续由对应 Backend 在会话启动时校验，
 并通过 Controller 保留原始结构化 Issue。Composition 不复制 Backend 的业务校验逻辑，也不创建
 输出目录。
 
@@ -270,7 +276,7 @@ Composition 构造函数只保存配置和初始化 PImpl，不创建工作线�
 | `DefaultNotifier` | `shared_ptr` 直接持有 | 无 |
 | `CapturedVideoFrameStore` | `unique_ptr` 直接持有 | Notifier |
 | `EncodedVideoAccessUnitQueue` | `unique_ptr` 直接持有 | Notifier |
-| `DefaultVideoOutputWorker` | `unique_ptr` 直接持有 | AU Queue、Notifier；独占 File Backend |
+| `DefaultVideoOutputWorker` | `unique_ptr` 直接持有 | AU Queue、Notifier；独占 RTP/UDP Backend |
 | `DefaultVideoEncoderWorker` | `unique_ptr` 直接持有 | FrameStore、AU Queue、Notifier；独占 FFmpeg Backend |
 | `DefaultVideoCaptureWorker` | `unique_ptr` 直接持有 | FrameStore、Notifier；独占 DXGI Backend |
 | `DefaultPublisherController` | `unique_ptr` 直接持有 | 三个 Worker、两个资源 Control 接口、Notifier |
@@ -285,7 +291,7 @@ Backend 在 Worker 构造时通过 `unique_ptr` 移交所有权。因此 Composi
 1. DefaultNotifier
 2. CapturedVideoFrameStore
 3. EncodedVideoAccessUnitQueue
-4. H264FileOutputBackend -> DefaultVideoOutputWorker
+4. RtpUdpVideoOutputBackend -> DefaultVideoOutputWorker
 5. FfmpegH264EncoderBackend -> DefaultVideoEncoderWorker
 6. DxgiDesktopCaptureBackend -> DefaultVideoCaptureWorker
 7. DefaultPublisherController
@@ -304,7 +310,7 @@ PImpl 成员声明顺序应与上述创建顺序一致，使 C++ 的默认逆序
 2. 销毁 Controller
 3. 销毁 Capture Worker 及其 DXGI Backend
 4. 销毁 Encoder Worker 及其 FFmpeg Backend
-5. 销毁 Output Worker 及其 File Backend
+5. 销毁 Output Worker 及其 RTP/UDP Backend
 6. 销毁 FrameStore 和 AU Queue
 7. 销毁 Notifier
 ```
@@ -355,7 +361,7 @@ application::PublisherVideoPipeline pipeline{
 
 ## 8. 平台行为
 
-M1 生产采集 Backend 仅在 Windows 上存在：
+当前生产采集 Backend 仅在 Windows 上存在：
 
 - Windows 使用 `DxgiDesktopCaptureBackend`；
 - 非 Windows 调用 `assemble()` 返回 `CheckPlatform` 错误；
@@ -387,38 +393,38 @@ return process exit code
 Ctrl+C handler 只修改无锁停止标志，不调用 Controller、Composition、日志或任何非信号安全
 代码。Main 使用 `wait_for_terminal_for()` 的有界超时定期观察该标志。
 
-M1 首轮 CLI 只需暴露完成文件验收所需的选项，例如输出路径、显示器选择和鼠标指针
-开关。编码输出保持已定的 1920x1080、30 fps、4 Mbps 和 GOP 60 默认值；需要调优时再
-扩展 CLI，不将命令行字符串或 parser 对象传入 Composition。
+CLI 暴露必选的 RTP 地址和端口、可选的 Payload Type 和最大数据报大小，以及显示器选择和鼠标
+指针开关。编码输出保持已定的 1920x1080、30 fps、4 Mbps 和 GOP 60 默认值；需要调优时再扩展
+CLI，不将命令行字符串或 parser 对象传入 Composition。
 
 ## 10. 测试边界
 
 `publisher_composition_test` 覆盖：
 
-- 默认配置在 Windows 上可完成装配，但不打开 DXGI 或输出文件；
+- 有效 RTP 配置在 Windows 上可完成装配，但不打开 DXGI 或 UDP Socket；
 - 成功装配后 Controller 非空；
 - 重复 `assemble()` 返回 `Control` 错误；
 - 装配前 `dispose()` 成功；
 - 重复 `dispose()` 成功；
 - 释放后 Controller 为空，且不能重新装配；
-- 空输出路径和非正 recovery timeout 在创建对象前被拒绝；
+- 非法 RTP 配置和非正 recovery timeout 在创建对象前被拒绝；
 - 非 Windows 返回明确的 `CheckPlatform` 错误；
 - 空闲对象图销毁后不留存工作线程。
 
 Composition 测试不重复 Controller 已覆盖的启动、Drain、Abort、状态机和运行期错误。
-Synthetic + FFmpeg + File Backend 的完整自动化链路继续由 integration test 覆盖。DXGI 真实输出
-仍属于 Windows M1 手工验收，不注册为无设备 CTest。
+Synthetic + FFmpeg + File Backend 的 M1 历史链路继续由 integration test 覆盖；无设备 RTP
+端到端集成测试在下一增量补充。DXGI 真实输出仍属于 Windows 手工验收，不注册为无设备 CTest。
 
 ## 11. 已决定
 
 - Composition 是非泛型、进程级、单次装配的对象图所有者；
 - Composition 不是 Controller、服务定位器或依赖注入容器；
-- M1 只装配视频轨道和 H.264 文件主输出；
+- 当前只装配视频轨道和 RTP/UDP 主输出；
 - 公开配置复用已有采集和编码配置值类型；
 - Backend 由 Worker 独占拥有，Composition 仅传递性拥有；
 - Controller 是最后创建、最先销毁的对象；
 - Main 只获得 Controller 的有效期受限非拥有指针；
 - `dispose()` 幂等，停止失败不得阻止剩余资源释放；
 - Composition 析构执行无异常兜底，正常路径由 Main 显式释放；
-- M1 非 Windows 正常运行返回不支持，不隐式切换 Synthetic Backend；
+- 非 Windows 正常运行返回不支持，不隐式切换 Synthetic Backend；
 - 日志、CLI、Ctrl+C 和进程退出码仍属于 Main。
