@@ -11,6 +11,7 @@ add_test(
     COMMAND semilive_receiver_lifecycle_smoke_test
 )
 
+add_subdirectory(contracts)
 add_subdirectory(domain/rtp)
 add_subdirectory(domain/h264)
 add_subdirectory(domain/pipeline)
