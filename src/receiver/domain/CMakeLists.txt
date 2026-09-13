@@ -4,6 +4,7 @@ add_library(semilive_receiver_domain STATIC
     src/h264/h264_access_unit_assembler.cpp
     src/h264/h264_recovery_gate.cpp
     src/h264/h264_rtp_depacketizer.cpp
+    src/pipeline/h264_rtp_receive_pipeline.cpp
     src/rtp/rtp_parser.cpp
     src/rtp/rtp_reorder_buffer.cpp
     src/rtp/rtp_session_filter.cpp

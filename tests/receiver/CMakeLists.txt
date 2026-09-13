@@ -13,3 +13,4 @@ add_test(
 
 add_subdirectory(domain/rtp)
 add_subdirectory(domain/h264)
+add_subdirectory(domain/pipeline)
