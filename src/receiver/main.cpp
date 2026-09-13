@@ -8,10 +8,10 @@ namespace {
 
 void print_help() {
     std::cout
-        << "SemiLive H.264/RTP receiver (lifecycle skeleton)\n"
+        << "SemiLive H.264/RTP receiver\n"
            "Usage: semilive_receiver [--help|--version]\n\n"
-           "UDP/RTP and media output options will be added in the next "
-           "milestones.\n";
+           "Command-line receive options will be added in the next "
+           "milestone.\n";
 }
 
 }  // namespace
@@ -37,15 +37,14 @@ int main(int argc, char* argv[]) {
     semilive::receiver::composition::ReceiverComposition graph;
     const auto assembled = graph.assemble();
     if (!assembled) {
-        std::cerr << "Failed to assemble receiver skeleton: "
+        std::cerr << "Failed to assemble receiver: "
                   << assembled.error().message << '\n';
         return EXIT_FAILURE;
     }
 
-    std::cout << "Receiver lifecycle skeleton assembled successfully.\n"
-                 "UDP/RTP media receiving is not implemented yet.\n";
+    std::cout << "Receiver graph assembled successfully.\n";
     if (const auto disposed = graph.dispose(); !disposed) {
-        std::cerr << "Failed to dispose receiver skeleton: "
+        std::cerr << "Failed to dispose receiver: "
                   << disposed.error().message << '\n';
         return EXIT_FAILURE;
     }

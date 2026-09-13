@@ -3,10 +3,13 @@
 #include <chrono>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <utility>
 
 namespace {
 
@@ -22,8 +25,38 @@ void require(const bool condition, const std::string_view message) {
     }
 }
 
+class TemporaryOutputFile final {
+public:
+    TemporaryOutputFile() {
+        const auto nonce = std::chrono::steady_clock::now()
+                               .time_since_epoch()
+                               .count();
+        path_ = std::filesystem::current_path() /
+                ("semilive_receiver_lifecycle_" + std::to_string(nonce) +
+                 ".h264");
+    }
+
+    ~TemporaryOutputFile() {
+        std::error_code ignored;
+        std::filesystem::remove(path_, ignored);
+    }
+
+    [[nodiscard]] const std::filesystem::path& path() const noexcept {
+        return path_;
+    }
+
+private:
+    std::filesystem::path path_;
+};
+
 void graph_runs_two_bounded_lifecycle_sessions() {
-    composition::ReceiverComposition graph;
+    TemporaryOutputFile output_file;
+    composition::ReceiverConfig config;
+    config.input.bind_address = "127.0.0.1";
+    config.input.bind_port = 0;
+    config.h264_output_path = output_file.path();
+    config.receive_poll_interval = 1ms;
+    composition::ReceiverComposition graph{std::move(config)};
     require(graph.controller() == nullptr,
             "unassembled graph must not expose a controller");
     require(graph.assemble().has_value(),
@@ -41,6 +74,13 @@ void graph_runs_two_bounded_lifecycle_sessions() {
             "first receive session must use id 1");
     require(controller->state() == app::ReceiverControllerState::Running,
             "started receiver must be running");
+    const auto running_stats = controller->stats();
+    require(running_stats.input && running_stats.input->bound_port != 0,
+            "running graph must own a bound UDP endpoint");
+    require(running_stats.output &&
+                running_stats.output->output_name ==
+                    output_file.path().string(),
+            "running graph must own the configured file output");
 
     const auto terminal = controller->wait_for_terminal_for(5ms);
     require(terminal.status == app::ReceiverWaitStatus::Timeout,

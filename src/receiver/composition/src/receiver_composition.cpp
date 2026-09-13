@@ -2,6 +2,8 @@
 
 #include <semilive/receiver/application/default_receiver_controller.hpp>
 #include <semilive/receiver/domain/worker/default_video_receive_worker.hpp>
+#include <semilive/receiver/infrastructure/network/udp_datagram_source_backend.hpp>
+#include <semilive/receiver/infrastructure/output/file/h264_file_output_backend.hpp>
 
 #include <exception>
 #include <memory>
@@ -49,7 +51,7 @@ struct ReceiverComposition::Impl {
     void reset_graph() noexcept;
     void dispose_noexcept() noexcept;
 
-    [[maybe_unused]] ReceiverConfig config_;
+    ReceiverConfig config_;
     State state_ = State::Unassembled;
     std::unique_ptr<domain::DefaultVideoReceiveWorker> worker_;
     std::unique_ptr<application::DefaultReceiverController> controller_;
@@ -69,7 +71,18 @@ ReceiverCompositionResult ReceiverComposition::Impl::assemble() {
 
     auto operation = ReceiverCompositionOperation::CreateWorker;
     try {
-        worker_ = std::make_unique<domain::DefaultVideoReceiveWorker>();
+        auto input =
+            std::make_unique<infra::network::UdpDatagramSourceBackend>();
+        auto pipeline = std::make_unique<domain::H264RtpReceivePipeline>(
+            config_.pipeline);
+        auto output =
+            std::make_unique<infra::output::H264FileOutputBackend>(
+                config_.h264_output_path);
+        domain::DefaultVideoReceiveWorkerConfig worker_config{
+            config_.input, config_.receive_poll_interval};
+        worker_ = std::make_unique<domain::DefaultVideoReceiveWorker>(
+            std::move(worker_config), std::move(input), std::move(pipeline),
+            std::move(output));
 
         operation = ReceiverCompositionOperation::CreateController;
         controller_ =
