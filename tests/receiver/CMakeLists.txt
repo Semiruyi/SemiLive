@@ -10,3 +10,5 @@ add_test(
     NAME semilive_receiver_lifecycle_smoke
     COMMAND semilive_receiver_lifecycle_smoke_test
 )
+
+add_subdirectory(domain/rtp)

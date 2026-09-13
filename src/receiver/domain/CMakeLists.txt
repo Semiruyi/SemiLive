@@ -1,6 +1,7 @@
 find_package(Threads REQUIRED)
 
 add_library(semilive_receiver_domain STATIC
+    src/rtp/rtp_parser.cpp
     src/worker/default_video_receive_worker.cpp
 )
 
