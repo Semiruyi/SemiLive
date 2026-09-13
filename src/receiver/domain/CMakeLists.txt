@@ -7,6 +7,7 @@ add_library(semilive_receiver_domain STATIC
     src/rtp/rtp_parser.cpp
     src/rtp/rtp_reorder_buffer.cpp
     src/rtp/rtp_session_filter.cpp
+    src/rtp/rtp_timestamp_mapper.cpp
     src/worker/default_video_receive_worker.cpp
 )
 

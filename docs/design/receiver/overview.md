@@ -38,8 +38,8 @@ Main
          -> bounded packet reorder
          -> H.264 depacketization
          -> Access Unit assembly
-         -> RTP timestamp mapping
          -> random-access recovery gate
+         -> RTP timestamp mapping
       -> LiveVideoOutputBackend
          -> Annex-B file output（阶段验证）
          -> SemiPlayer adapter（最终输出）
