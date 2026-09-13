@@ -137,13 +137,66 @@ validate_config(const contract::DatagramSourceConfig& config) {
             contract::DatagramSourceOperation::Open, 0,
             "UDP maximum datagram size must be in 1..65507")};
     }
+    if (config.receive_buffer_bytes == 0 ||
+        config.receive_buffer_bytes > static_cast<std::size_t>(INT_MAX)) {
+        return std::unexpected{issue(
+            contract::DatagramSourceOperation::Open, 0,
+            "UDP receive buffer size must be in 1..2147483647")};
+    }
     return {};
+}
+
+[[nodiscard]] std::expected<std::size_t, contract::DatagramSourceIssue>
+configure_receive_buffer(const NativeSocket socket,
+                         const std::size_t requested_bytes) {
+    const auto requested = static_cast<int>(requested_bytes);
+#if defined(_WIN32)
+    const auto set_result = setsockopt(
+        socket, SOL_SOCKET, SO_RCVBUF,
+        reinterpret_cast<const char*>(&requested),
+        static_cast<int>(sizeof(requested)));
+#else
+    const auto set_result = setsockopt(
+        socket, SOL_SOCKET, SO_RCVBUF, &requested,
+        static_cast<socklen_t>(sizeof(requested)));
+#endif
+    if (set_result != 0) {
+        return std::unexpected{issue(
+            contract::DatagramSourceOperation::Open,
+            current_socket_error(),
+            "failed to configure UDP receive buffer")};
+    }
+
+    int actual = 0;
+#if defined(_WIN32)
+    int option_size = static_cast<int>(sizeof(actual));
+    const auto get_result = getsockopt(
+        socket, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<char*>(&actual),
+        &option_size);
+#else
+    socklen_t option_size = static_cast<socklen_t>(sizeof(actual));
+    const auto get_result =
+        getsockopt(socket, SOL_SOCKET, SO_RCVBUF, &actual, &option_size);
+#endif
+    if (get_result != 0) {
+        return std::unexpected{issue(
+            contract::DatagramSourceOperation::Open,
+            current_socket_error(),
+            "failed to query UDP receive buffer")};
+    }
+    if (actual <= 0) {
+        return std::unexpected{issue(
+            contract::DatagramSourceOperation::Open, 0,
+            "operating system reported an invalid UDP receive buffer")};
+    }
+    return static_cast<std::size_t>(actual);
 }
 
 [[nodiscard]] std::expected<contract::DatagramSourceInfo,
                             contract::DatagramSourceIssue>
 bound_endpoint(const NativeSocket socket,
-               const std::size_t maximum_datagram_bytes) {
+               const std::size_t maximum_datagram_bytes,
+               const std::size_t receive_buffer_bytes) {
     sockaddr_storage storage{};
     SocketLength size = static_cast<SocketLength>(sizeof(storage));
     if (getsockname(socket, reinterpret_cast<sockaddr*>(&storage), &size) !=
@@ -180,7 +233,7 @@ bound_endpoint(const NativeSocket socket,
             "failed to format bound UDP address")};
     }
     return contract::DatagramSourceInfo{
-        address_text, port, maximum_datagram_bytes};
+        address_text, port, maximum_datagram_bytes, receive_buffer_bytes};
 }
 
 [[nodiscard]] timeval select_timeout(
@@ -261,6 +314,14 @@ contract::DatagramSourceOpenResult UdpDatagramSourceBackend::Impl::open(
             contract::DatagramSourceOperation::Open, native_code,
             "failed to create UDP input socket")};
     }
+
+    auto receive_buffer =
+        configure_receive_buffer(socket, config.receive_buffer_bytes);
+    if (!receive_buffer) {
+        auto error = std::move(receive_buffer.error());
+        close();
+        return std::unexpected{std::move(error)};
+    }
     if (::bind(socket,
                reinterpret_cast<const sockaddr*>(&endpoint->storage),
                endpoint->size) != 0) {
@@ -271,7 +332,8 @@ contract::DatagramSourceOpenResult UdpDatagramSourceBackend::Impl::open(
             "failed to bind UDP input socket")};
     }
 
-    auto info = bound_endpoint(socket, config.maximum_datagram_bytes);
+    auto info = bound_endpoint(socket, config.maximum_datagram_bytes,
+                               *receive_buffer);
     if (!info) {
         auto error = std::move(info.error());
         close();

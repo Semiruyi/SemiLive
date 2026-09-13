@@ -83,7 +83,8 @@ public:
             config.bind_address,
             config.bind_port == 0 ? static_cast<std::uint16_t>(40'000)
                                   : config.bind_port,
-            config.maximum_datagram_bytes};
+            config.maximum_datagram_bytes,
+            config.receive_buffer_bytes};
     }
 
     [[nodiscard]] input_contract::DatagramSourceReceiveResult receive_for(

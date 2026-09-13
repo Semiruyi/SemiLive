@@ -15,6 +15,7 @@ struct DatagramSourceConfig {
     std::string bind_address = "0.0.0.0";
     std::uint16_t bind_port = 5004;
     std::size_t maximum_datagram_bytes = 65'507;
+    std::size_t receive_buffer_bytes = 4U * 1024U * 1024U;
 };
 
 enum class DatagramSourceOperation : std::uint8_t {
@@ -34,6 +35,7 @@ struct DatagramSourceInfo {
     std::string bound_address;
     std::uint16_t bound_port = 0;
     std::size_t maximum_datagram_bytes = 0;
+    std::size_t receive_buffer_bytes = 0;
 };
 
 struct DatagramReceiveTimeout {};

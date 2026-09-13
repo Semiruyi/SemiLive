@@ -33,7 +33,7 @@ public:
         opened_config = config;
         return network::DatagramSourceInfo{
             config.bind_address, config.bind_port,
-            config.maximum_datagram_bytes};
+            config.maximum_datagram_bytes, config.receive_buffer_bytes};
     }
 
     [[nodiscard]] network::DatagramSourceReceiveResult receive_for(
@@ -64,11 +64,12 @@ static_assert(!std::is_move_constructible_v<RecordingDatagramSource>);
 void preserves_configuration_owned_datagrams_and_timeout_observations() {
     RecordingDatagramSource source;
     const network::DatagramSourceConfig config{
-        "127.0.0.1", 6000, 1400};
+        "127.0.0.1", 6000, 1400, 2U * 1024U * 1024U};
     auto opened = source.open(config);
     require(opened && opened->bound_address == "127.0.0.1" &&
                 opened->bound_port == 6000 &&
-                opened->maximum_datagram_bytes == 1400,
+                opened->maximum_datagram_bytes == 1400 &&
+                opened->receive_buffer_bytes == 2U * 1024U * 1024U,
             "open must preserve the effective bound endpoint and limit");
 
     source.next_datagram = model::UdpDatagram{

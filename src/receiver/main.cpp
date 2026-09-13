@@ -75,6 +75,9 @@ void print_help() {
            "                                  (default: bind first source)\n"
            "  --rtp-max-datagram-bytes SIZE   Maximum accepted UDP payload\n"
            "                                  (default: 65507)\n"
+           "  --udp-receive-buffer-bytes SIZE Requested kernel UDP receive "
+           "buffer\n"
+           "                                  (default: 4194304)\n"
            "  --output PATH                   Annex-B H.264 output file\n"
            "                                  (default: semilive-received.h264;\n"
            "                                   existing file is replaced)\n"
@@ -103,6 +106,7 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
     bool payload_type_set = false;
     bool ssrc_set = false;
     bool maximum_datagram_set = false;
+    bool receive_buffer_set = false;
     bool output_set = false;
     bool poll_interval_set = false;
 
@@ -211,6 +215,31 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
             options.receiver.input.maximum_datagram_bytes =
                 static_cast<std::size_t>(*value);
             maximum_datagram_set = true;
+            continue;
+        }
+
+        if (argument == "--udp-receive-buffer-bytes") {
+            if (receive_buffer_set) {
+                return std::unexpected{
+                    "--udp-receive-buffer-bytes may only be specified "
+                    "once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{
+                    "--udp-receive-buffer-bytes requires a value"};
+            }
+            const auto value = parse_unsigned(argv[index]);
+            if (!value || *value == 0 ||
+                *value >
+                    static_cast<std::uint64_t>(
+                        std::numeric_limits<int>::max())) {
+                return std::unexpected{
+                    "--udp-receive-buffer-bytes requires an integer in "
+                    "1..2147483647"};
+            }
+            options.receiver.input.receive_buffer_bytes =
+                static_cast<std::size_t>(*value);
+            receive_buffer_set = true;
             continue;
         }
 
@@ -324,7 +353,8 @@ void print_started(const app::ReceiverStarted& started,
     std::cout << "Receiving session " << started.session_id << '\n';
     if (stats.input) {
         std::cout << "  input: " << stats.input->bound_address << ':'
-                  << stats.input->bound_port << '\n';
+                  << stats.input->bound_port << " (UDP receive buffer: "
+                  << stats.input->receive_buffer_bytes << " bytes)\n";
     }
     if (stats.output) {
         std::cout << "  output: " << stats.output->output_name << '\n';
@@ -332,10 +362,12 @@ void print_started(const app::ReceiverStarted& started,
     std::cout << "Press Ctrl+C to stop.\n";
 
     SEMILIVE_LOG_INFO(
-        "receiver session {} started: input={}:{}, output={}",
+        "receiver session {} started: input={}:{}, "
+        "udp_receive_buffer_bytes={}, output={}",
         started.session_id,
         stats.input ? stats.input->bound_address : std::string{"unknown"},
         stats.input ? stats.input->bound_port : 0,
+        stats.input ? stats.input->receive_buffer_bytes : 0,
         stats.output ? stats.output->output_name : std::string{"unknown"});
 }
 

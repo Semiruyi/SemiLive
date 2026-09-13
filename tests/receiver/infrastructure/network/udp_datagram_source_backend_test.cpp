@@ -1,6 +1,7 @@
 #include <semilive/receiver/infrastructure/network/udp_datagram_source_backend.hpp>
 
 #include <chrono>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -119,10 +120,13 @@ void send_loopback(const std::uint16_t port,
 
 void receives_owned_datagrams_over_ipv4_loopback() {
     infra::UdpDatagramSourceBackend source;
-    const auto opened = source.open({"127.0.0.1", 0, 65'507});
+    constexpr std::size_t requested_receive_buffer = 4U * 1024U * 1024U;
+    const auto opened = source.open(
+        {"127.0.0.1", 0, 65'507, requested_receive_buffer});
     require(opened && opened->bound_address == "127.0.0.1" &&
                 opened->bound_port != 0 &&
-                opened->maximum_datagram_bytes == 65'507,
+                opened->maximum_datagram_bytes == 65'507 &&
+                opened->receive_buffer_bytes > 0,
             "source must report its effective ephemeral endpoint");
 
     const std::vector payload{
@@ -175,6 +179,15 @@ void enforces_configuration_and_reusable_lifecycle() {
             "zero datagram bound must be rejected");
     require(!source.open({"127.0.0.1", 5004, 65'508}),
             "datagram bound above UDP payload limit must be rejected");
+    require(!source.open({"127.0.0.1", 5004, 1200, 0}),
+            "zero receive buffer must be rejected");
+    if constexpr (sizeof(std::size_t) > sizeof(int)) {
+        const auto above_native_limit =
+            static_cast<std::size_t>(INT_MAX) + 1U;
+        require(!source.open(
+                    {"127.0.0.1", 5004, 1200, above_native_limit}),
+                "receive buffer above native socket limit must be rejected");
+    }
 
     const auto first = source.open({"127.0.0.1", 0, 1200});
     require(first.has_value(), "valid source must open");

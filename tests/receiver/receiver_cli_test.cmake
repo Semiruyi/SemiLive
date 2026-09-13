@@ -93,6 +93,22 @@ if(poll_result EQUAL 0 OR
 endif()
 
 execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}" --udp-receive-buffer-bytes 0
+    RESULT_VARIABLE receive_buffer_result
+    OUTPUT_VARIABLE receive_buffer_stdout
+    ERROR_VARIABLE receive_buffer_stderr
+)
+if(receive_buffer_result EQUAL 0 OR
+   NOT receive_buffer_stderr MATCHES
+       "--udp-receive-buffer-bytes requires an integer in 1..2147483647")
+    message(FATAL_ERROR
+        "receiver accepted invalid UDP receive buffer: "
+        "result=${receive_buffer_result}, stdout=${receive_buffer_stdout}, "
+        "stderr=${receive_buffer_stderr}"
+    )
+endif()
+
+execute_process(
     COMMAND "${SEMILIVE_RECEIVER}" --output
     RESULT_VARIABLE output_result
     OUTPUT_VARIABLE output_stdout
