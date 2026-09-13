@@ -1,6 +1,7 @@
 find_package(Threads REQUIRED)
 
 add_library(semilive_receiver_domain STATIC
+    src/h264/h264_access_unit_assembler.cpp
     src/h264/h264_rtp_depacketizer.cpp
     src/rtp/rtp_parser.cpp
     src/rtp/rtp_reorder_buffer.cpp
