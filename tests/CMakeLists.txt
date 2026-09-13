@@ -10,3 +10,4 @@ add_test(NAME semilive_receiver_help COMMAND semilive_receiver --help)
 
 add_subdirectory(common)
 add_subdirectory(publisher)
+add_subdirectory(receiver)
