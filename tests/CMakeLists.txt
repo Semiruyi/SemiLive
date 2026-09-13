@@ -7,6 +7,12 @@ add_test(
 )
 add_test(NAME semilive_relay_help COMMAND semilive_relay --help)
 add_test(NAME semilive_receiver_help COMMAND semilive_receiver --help)
+add_test(
+    NAME semilive_receiver_cli
+    COMMAND ${CMAKE_COMMAND}
+        -DSEMILIVE_RECEIVER=$<TARGET_FILE:semilive_receiver>
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/receiver/receiver_cli_test.cmake
+)
 
 add_subdirectory(common)
 add_subdirectory(publisher)
