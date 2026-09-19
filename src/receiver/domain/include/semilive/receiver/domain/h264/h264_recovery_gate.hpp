@@ -25,6 +25,9 @@ struct H264RecoveryGateStats {
     std::uint64_t recovery_episodes_completed = 0;
     std::chrono::nanoseconds recovery_wait_total{};
     std::chrono::nanoseconds recovery_wait_maximum{};
+    std::optional<std::chrono::nanoseconds> active_recovery_wait;
+    std::chrono::nanoseconds recovery_wait_total_including_active{};
+    std::chrono::nanoseconds recovery_wait_maximum_including_active{};
     H264RecoveryState state = H264RecoveryState::WaitingForRandomAccess;
 };
 
@@ -41,6 +44,8 @@ public:
     void require_random_access(Clock::time_point observed_at) noexcept;
 
     [[nodiscard]] H264RecoveryGateStats stats() const noexcept;
+    [[nodiscard]] H264RecoveryGateStats stats(
+        Clock::time_point observed_at) const noexcept;
     [[nodiscard]] H264RecoveryState state() const noexcept;
     void reset() noexcept;
 

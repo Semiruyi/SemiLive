@@ -1,5 +1,6 @@
 #include <semilive/common/log/log.hpp>
 #include <semilive/publisher/composition/publisher_composition.hpp>
+#include <semilive/publisher/reporting/publisher_session_report.hpp>
 
 #include <charconv>
 #include <chrono>
@@ -8,7 +9,9 @@
 #include <cstdlib>
 #include <exception>
 #include <expected>
+#include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -23,6 +26,7 @@ using namespace std::chrono_literals;
 namespace app = semilive::publisher::application;
 namespace composition = semilive::publisher::composition;
 namespace capture = semilive::publisher::contracts::capture;
+namespace reporting = semilive::publisher::reporting;
 
 volatile std::sig_atomic_t stop_requested = 0;
 
@@ -39,6 +43,7 @@ enum class CommandLineAction {
 struct CommandLineOptions {
     CommandLineAction action = CommandLineAction::Run;
     composition::PublisherConfig publisher;
+    std::optional<std::filesystem::path> stats_json_path;
 };
 
 using CommandLineResult = std::expected<CommandLineOptions, std::string>;
@@ -71,6 +76,9 @@ void print_help() {
            "  --display TARGET                  Capture primary or zero-based\n"
            "                                    display INDEX (default: primary)\n"
            "  --no-pointer                      Do not compose the mouse pointer\n"
+           "  --stats-json PATH                 Write final session statistics "
+           "as JSON\n"
+           "                                    (existing file is replaced)\n"
            "  --help                            Show this help\n"
            "  --version                         Show the version\n";
 }
@@ -83,6 +91,7 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
     bool rtp_max_datagram_bytes_set = false;
     bool display_set = false;
     bool pointer_disabled = false;
+    bool stats_json_set = false;
 
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{argv[index]};
@@ -226,6 +235,19 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
             }
             options.publisher.video.capture.compose_pointer = false;
             pointer_disabled = true;
+            continue;
+        }
+
+        if (argument == "--stats-json") {
+            if (stats_json_set) {
+                return std::unexpected{
+                    "--stats-json may only be specified once"};
+            }
+            if (++index >= argc || std::string_view{argv[index]}.empty()) {
+                return std::unexpected{"--stats-json requires a path"};
+            }
+            options.stats_json_path = std::filesystem::path{argv[index]};
+            stats_json_set = true;
             continue;
         }
 
@@ -392,7 +414,10 @@ bool dispose_composition(composition::PublisherComposition& graph) {
     return false;
 }
 
-int run_publisher(composition::PublisherConfig config) {
+int run_publisher(
+    composition::PublisherConfig config,
+    const std::optional<std::filesystem::path>& stats_json_path) {
+    const auto report_config = config;
     composition::PublisherComposition graph{std::move(config)};
     const auto assembled = graph.assemble();
     if (!assembled) {
@@ -416,6 +441,7 @@ int run_publisher(composition::PublisherConfig config) {
     }
 
     print_started(*started);
+    const auto session_started_at = std::chrono::steady_clock::now();
     bool succeeded = true;
     while (stop_requested == 0) {
         const auto terminal = controller->wait_for_terminal_for(250ms);
@@ -452,9 +478,24 @@ int run_publisher(composition::PublisherConfig config) {
         succeeded = false;
     }
 
-    print_final_stats(controller->stats());
+    const auto stats = controller->stats();
+    const auto session_duration =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - session_started_at);
+    print_final_stats(stats);
     if (!dispose_composition(graph)) {
         succeeded = false;
+    }
+    if (stats_json_path) {
+        const reporting::PublisherSessionReport report{
+            report_config, stats, session_duration, succeeded};
+        if (const auto written = reporting::write_publisher_session_report_json(
+                *stats_json_path, report);
+            !written) {
+            std::cerr << written.error() << '\n';
+            SEMILIVE_LOG_ERROR("{}", written.error());
+            succeeded = false;
+        }
     }
 
     return succeeded ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -494,7 +535,8 @@ int main(int argc, char* argv[]) {
     }
 
     try {
-        const auto result = run_publisher(options->publisher);
+        const auto result =
+            run_publisher(options->publisher, options->stats_json_path);
         SEMILIVE_LOG_INFO("publisher process stopped with exit code {}",
                           result);
         return result;

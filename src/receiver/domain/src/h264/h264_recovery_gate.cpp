@@ -62,8 +62,28 @@ void H264RecoveryGate::enter_recovery(
 }
 
 H264RecoveryGateStats H264RecoveryGate::stats() const noexcept {
+    return stats(Clock::now());
+}
+
+H264RecoveryGateStats H264RecoveryGate::stats(
+    const Clock::time_point observed_at) const noexcept {
     auto snapshot = stats_;
     snapshot.state = state_;
+    snapshot.recovery_wait_total_including_active =
+        snapshot.recovery_wait_total;
+    snapshot.recovery_wait_maximum_including_active =
+        snapshot.recovery_wait_maximum;
+    if (recovery_started_at_) {
+        const auto active_wait =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::max(Clock::duration::zero(),
+                         observed_at - *recovery_started_at_));
+        snapshot.active_recovery_wait = active_wait;
+        snapshot.recovery_wait_total_including_active += active_wait;
+        snapshot.recovery_wait_maximum_including_active =
+            std::max(snapshot.recovery_wait_maximum_including_active,
+                     active_wait);
+    }
     return snapshot;
 }
 

@@ -56,6 +56,7 @@ struct VideoReceiveWorkerStats {
     std::uint64_t failed_sessions = 0;
     std::uint64_t start_failures = 0;
     std::uint64_t received_datagrams = 0;
+    std::uint64_t received_bytes = 0;
     std::uint64_t receive_timeouts = 0;
     std::uint64_t submitted_access_units = 0;
     std::uint64_t submitted_bytes = 0;
@@ -64,6 +65,9 @@ struct VideoReceiveWorkerStats {
     std::chrono::nanoseconds session_duration{};
     std::optional<std::chrono::nanoseconds> first_output_delay;
     std::optional<std::chrono::nanoseconds> maximum_output_gap;
+    std::optional<std::chrono::nanoseconds> terminal_output_gap;
+    std::uint64_t output_stall_events = 0;
+    std::chrono::nanoseconds output_stall_excess_total{};
     std::optional<contracts::network::DatagramSourceInfo> input;
     std::optional<contracts::output::LiveVideoOutputInfo> output;
     H264RtpReceivePipelineStats pipeline;

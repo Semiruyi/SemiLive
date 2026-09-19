@@ -153,6 +153,24 @@ void external_output_loss_uses_the_same_recovery_policy() {
             "repeated recovery requests must be observable without restarting timing");
 }
 
+void active_recovery_wait_is_visible_without_marking_completion() {
+    domain::H264RecoveryGate gate;
+    static_cast<void>(
+        gate.consume(access_unit_event(12'500, true, true, true), at(10)));
+    gate.require_random_access(at(20));
+
+    const auto stats = gate.stats(at(75));
+    require(stats.recovery_episodes_started == 1 &&
+                stats.recovery_episodes_completed == 0 &&
+                stats.recovery_wait_total == std::chrono::nanoseconds::zero() &&
+                stats.active_recovery_wait == std::chrono::milliseconds{55} &&
+                stats.recovery_wait_total_including_active ==
+                    std::chrono::milliseconds{55} &&
+                stats.recovery_wait_maximum_including_active ==
+                    std::chrono::milliseconds{55},
+            "an unfinished recovery must remain visible in a final snapshot");
+}
+
 void reset_restores_new_session_state_and_statistics() {
     domain::H264RecoveryGate gate;
     static_cast<void>(
@@ -184,6 +202,7 @@ int main() {
         streaming_passes_complete_access_units_without_spurious_resets();
         assembler_discontinuity_waits_until_the_next_recovery_point();
         external_output_loss_uses_the_same_recovery_policy();
+        active_recovery_wait_is_visible_without_marking_completion();
         reset_restores_new_session_state_and_statistics();
     } catch (const std::exception& error) {
         std::cerr << "H.264 recovery gate test failed: " << error.what()

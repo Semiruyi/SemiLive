@@ -124,8 +124,12 @@ Controller 只提供接收会话的启动、停止、状态、等待和统计接
 
 启动时等待第一个完整 SPS/PPS/IDR 计入 `first_output_delay`，但不计为弱网恢复 episode。只有已经
 进入 Streaming 后再次进入 `WaitingForRandomAccess`，才开始一次恢复计时；重复 discontinuity 不
-重置开始时间。`maximum_output_gap` 是 Receiver 成功提交 AU 的最大墙钟间隔，只作为当前文件输出
-阶段的链路停顿代理，不表述为播放器画面冻结。
+重置开始时间。已完成恢复的等待时间与会话结束时仍在进行的 `active_wait` 分开记录，同时提供
+包含 active wait 的总值和最大值。
+
+`maximum_output_gap` 覆盖相邻成功提交 AU 的间隔，以及最后一次成功提交到会话结束的尾部间隔。
+`output_stall` 使用报告中固定的阈值统计事件数和超出阈值的累计时长。这些字段只作为当前文件
+输出阶段的链路停顿代理，不表述为播放器画面冻结。
 
 ## 4. 线程模型
 

@@ -46,6 +46,10 @@ validate_default_video_receive_worker_config(
         return std::unexpected{
             "video receive poll interval must be positive"};
     }
+    if (config.output_stall_threshold <= std::chrono::milliseconds::zero()) {
+        return std::unexpected{
+            "video output stall threshold must be positive"};
+    }
     return {};
 }
 
@@ -93,6 +97,7 @@ struct DefaultVideoReceiveWorker::Impl {
     void finish_start_failure(VideoReceiveWorkerIssue issue) noexcept;
     void fail_running_session(VideoReceiveWorkerIssue issue) noexcept;
     void publish_pipeline_stats() noexcept;
+    void record_output_gap(std::chrono::nanoseconds gap) noexcept;
     void finish_session_timing() noexcept;
     void close_session(output_contract::LiveVideoOutputCloseMode mode) noexcept;
     void stop_noexcept() noexcept;
@@ -130,6 +135,7 @@ VideoReceiveStartResult DefaultVideoReceiveWorker::Impl::start() {
     stats_.state = VideoReceiveWorkerState::Starting;
     ++stats_.session_id;
     stats_.received_datagrams = 0;
+    stats_.received_bytes = 0;
     stats_.receive_timeouts = 0;
     stats_.submitted_access_units = 0;
     stats_.submitted_bytes = 0;
@@ -138,6 +144,9 @@ VideoReceiveStartResult DefaultVideoReceiveWorker::Impl::start() {
     stats_.session_duration = std::chrono::nanoseconds::zero();
     stats_.first_output_delay.reset();
     stats_.maximum_output_gap.reset();
+    stats_.terminal_output_gap.reset();
+    stats_.output_stall_events = 0;
+    stats_.output_stall_excess_total = std::chrono::nanoseconds::zero();
     stats_.input.reset();
     stats_.output.reset();
     stats_.pipeline = {};
@@ -388,6 +397,8 @@ bool DefaultVideoReceiveWorker::Impl::process_one_observation(
             {
                 std::lock_guard lock{mutex_};
                 ++stats_.received_datagrams;
+                stats_.received_bytes +=
+                    static_cast<std::uint64_t>(datagram->bytes.size());
             }
             outputs = pipeline_->push(std::move(*datagram));
         } else {
@@ -471,10 +482,7 @@ DefaultVideoReceiveWorker::Impl::submit_outputs(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::max(Clock::duration::zero(),
                              accepted_at - *last_output_at_));
-            if (!stats_.maximum_output_gap ||
-                gap > *stats_.maximum_output_gap) {
-                stats_.maximum_output_gap = gap;
-            }
+            record_output_gap(gap);
         }
         last_output_at_ = accepted_at;
     }
@@ -530,6 +538,21 @@ void DefaultVideoReceiveWorker::Impl::publish_pipeline_stats() noexcept {
     stats_.pipeline = pipeline_stats;
 }
 
+void DefaultVideoReceiveWorker::Impl::record_output_gap(
+    const std::chrono::nanoseconds gap) noexcept {
+    if (!stats_.maximum_output_gap || gap > *stats_.maximum_output_gap) {
+        stats_.maximum_output_gap = gap;
+    }
+
+    const auto threshold =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            config_.output_stall_threshold);
+    if (gap > threshold) {
+        ++stats_.output_stall_events;
+        stats_.output_stall_excess_total += gap - threshold;
+    }
+}
+
 void DefaultVideoReceiveWorker::Impl::finish_session_timing() noexcept {
     const auto finished_at = Clock::now();
     std::lock_guard lock{mutex_};
@@ -540,12 +563,21 @@ void DefaultVideoReceiveWorker::Impl::finish_session_timing() noexcept {
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::max(Clock::duration::zero(),
                      finished_at - *session_started_at_));
+    if (last_output_at_) {
+        const auto terminal_gap =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::max(Clock::duration::zero(),
+                         finished_at - *last_output_at_));
+        stats_.terminal_output_gap = terminal_gap;
+        record_output_gap(terminal_gap);
+    }
     session_started_at_.reset();
 }
 
 void DefaultVideoReceiveWorker::Impl::close_session(
     const output_contract::LiveVideoOutputCloseMode mode) noexcept {
     finish_session_timing();
+    publish_pipeline_stats();
     if (input_open_) {
         input_->close();
         input_open_ = false;

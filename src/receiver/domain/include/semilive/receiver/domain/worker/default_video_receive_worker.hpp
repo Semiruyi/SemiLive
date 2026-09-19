@@ -14,6 +14,7 @@ namespace semilive::receiver::domain {
 struct DefaultVideoReceiveWorkerConfig {
     contracts::network::DatagramSourceConfig input;
     std::chrono::milliseconds receive_poll_interval{10};
+    std::chrono::milliseconds output_stall_threshold{100};
 };
 
 using DefaultVideoReceiveWorkerConfigValidationResult =

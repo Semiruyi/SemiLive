@@ -707,6 +707,11 @@ Main 在退出前调用 `PublisherComposition::dispose()`。如果当前会话�
 时刻的事务一致性，停止后的最终快照必须稳定。多轨实现后快照按 `session`、`video` 和 `audio`
 分组；未启用轨道明确标记为 disabled，不以全零数据冒充已运行轨道。
 
+Main 可通过 `--stats-json` 请求最终 `PublisherSessionReport`。Reporting 模块不进入媒体热路径，
+只在停止并取得稳定 Controller 快照、完成 Composition 释放后写出配置、会话时长和媒体/RTP
+计数。当前唯一输出是 RTP/UDP，因此报告将 `VideoOutputWorkerStats::emitted_units` 明确解释为媒体
+RTP datagram；增加其他输出类型时必须改为带类型的独立统计，不能继续沿用该解释。
+
 首版至少记录：
 
 - DXGI 新画面数量；

@@ -60,13 +60,20 @@ private:
     report.stats.session_duration = 1'234ms;
     report.stats.first_output_delay = 45ms;
     report.stats.maximum_output_gap = 67ms;
+    report.stats.terminal_output_gap = 89ms;
+    report.stats.output_stall_events = 2;
+    report.stats.output_stall_excess_total = 40ms;
     report.stats.received_datagrams = 100;
+    report.stats.received_bytes = 120'000;
     report.stats.pipeline.reorder.confirmed_lost_packets = 3;
     report.stats.pipeline.assembler.discarded_access_units = 2;
     report.stats.pipeline.recovery.recovery_episodes_started = 2;
     report.stats.pipeline.recovery.recovery_episodes_completed = 1;
     report.stats.pipeline.recovery.recovery_wait_total = 300ms;
     report.stats.pipeline.recovery.recovery_wait_maximum = 300ms;
+    report.stats.pipeline.recovery.active_recovery_wait = 125ms;
+    report.stats.pipeline.recovery.recovery_wait_total_including_active = 425ms;
+    report.stats.pipeline.recovery.recovery_wait_maximum_including_active = 300ms;
     report.stats.submitted_access_units = 80;
     report.stats.submitted_bytes = 12'345;
     return report;
@@ -82,13 +89,23 @@ void renders_machine_readable_baseline_fields() {
                     std::string::npos &&
                 json.find("\"duration_ms\": 1234") !=
                     std::string::npos &&
+                json.find("\"received_bytes\": 120000") !=
+                    std::string::npos &&
                 json.find("\"first_output_delay_ms\": 45") !=
+                    std::string::npos &&
+                json.find("\"terminal_output_gap_ms\": 89") !=
+                    std::string::npos &&
+                json.find("\"output_stall_events\": 2") !=
                     std::string::npos &&
                 json.find("\"confirmed_lost_packets\": 3") !=
                     std::string::npos &&
                 json.find("\"discarded_access_units\": 2") !=
                     std::string::npos &&
                 json.find("\"episodes_completed\": 1") !=
+                    std::string::npos &&
+                json.find("\"active_wait_ms\": 125") !=
+                    std::string::npos &&
+                json.find("\"wait_total_including_active_ms\": 425") !=
                     std::string::npos,
             "report must expose baseline transport and recovery metrics");
     require(json.find("video\\\"baseline.h264") != std::string::npos,

@@ -86,6 +86,9 @@ void print_help() {
            "                                   existing file is replaced)\n"
            "  --poll-interval-ms MS           Receive/timer poll interval\n"
            "                                  (default: 10, range: 1..1000)\n"
+           "  --output-stall-threshold-ms MS  Output gap threshold for stall "
+           "metrics\n"
+           "                                  (default: 100, range: 1..60000)\n"
            "  --stats-json PATH               Write final session statistics "
            "as JSON\n"
            "                                  (existing file is replaced)\n"
@@ -130,6 +133,7 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
     bool receive_buffer_set = false;
     bool output_set = false;
     bool poll_interval_set = false;
+    bool output_stall_threshold_set = false;
     bool stats_json_set = false;
 
     for (int index = 1; index < argc; ++index) {
@@ -310,6 +314,28 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
             }
             options.stats_json_path = std::filesystem::path{argv[index]};
             stats_json_set = true;
+            continue;
+        }
+
+        if (argument == "--output-stall-threshold-ms") {
+            if (output_stall_threshold_set) {
+                return std::unexpected{
+                    "--output-stall-threshold-ms may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{
+                    "--output-stall-threshold-ms requires a value"};
+            }
+            const auto value = parse_unsigned(argv[index]);
+            if (!value || *value == 0 || *value > 60'000) {
+                return std::unexpected{
+                    "--output-stall-threshold-ms requires an integer in "
+                    "1..60000"};
+            }
+            options.receiver.output_stall_threshold =
+                std::chrono::milliseconds{
+                    static_cast<std::chrono::milliseconds::rep>(*value)};
+            output_stall_threshold_set = true;
             continue;
         }
 

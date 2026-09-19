@@ -137,6 +137,22 @@ if(stats_path_result EQUAL 0 OR
 endif()
 
 execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}" --output-stall-threshold-ms 0
+    RESULT_VARIABLE stall_threshold_result
+    OUTPUT_VARIABLE stall_threshold_stdout
+    ERROR_VARIABLE stall_threshold_stderr
+)
+if(stall_threshold_result EQUAL 0 OR
+   NOT stall_threshold_stderr MATCHES
+       "--output-stall-threshold-ms requires an integer in 1..60000")
+    message(FATAL_ERROR
+        "receiver accepted invalid output stall threshold: "
+        "result=${stall_threshold_result}, stdout=${stall_threshold_stdout}, "
+        "stderr=${stall_threshold_stderr}"
+    )
+endif()
+
+execute_process(
     COMMAND "${SEMILIVE_RECEIVER}"
             --stats-json first.json --stats-json second.json
     RESULT_VARIABLE duplicate_stats_result

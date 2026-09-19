@@ -202,7 +202,9 @@ private:
 
 class WorkerFixture final {
 public:
-    WorkerFixture() : trace{std::make_shared<BackendTrace>()} {
+    explicit WorkerFixture(
+        const std::chrono::milliseconds output_stall_threshold = 100ms)
+        : trace{std::make_shared<BackendTrace>()} {
         auto input_owner =
             std::make_unique<ScriptedDatagramSource>(trace);
         input = input_owner.get();
@@ -213,6 +215,7 @@ public:
         config.input.bind_address = "127.0.0.1";
         config.input.bind_port = 0;
         config.receive_poll_interval = 2ms;
+        config.output_stall_threshold = output_stall_threshold;
         worker = std::make_unique<domain::DefaultVideoReceiveWorker>(
             std::move(config), std::move(input_owner),
             std::make_unique<domain::H264RtpReceivePipeline>(),
@@ -302,6 +305,7 @@ void drives_the_complete_pipeline_on_one_worker_thread() {
 
     const auto running_stats = fixture.worker->stats();
     require(running_stats.received_datagrams == 4 &&
+                running_stats.received_bytes > 0 &&
                 running_stats.pipeline.output_access_units == 2 &&
                 running_stats.submitted_access_units == 2,
             "worker must publish input, pipeline and output statistics");
@@ -381,6 +385,31 @@ void backpressure_discards_until_the_next_random_access_point() {
             "pipeline statistics must expose backpressure recovery");
     require(fixture.worker->stop().has_value(),
             "recovered worker must stop normally");
+}
+
+void session_end_accounts_for_an_unrecovered_output_stall() {
+    WorkerFixture fixture{1ms};
+    require(fixture.worker->start().has_value(),
+            "terminal stall test session must start");
+    queue_random_access(*fixture.input, 200, 90'000);
+    require(wait_until([&fixture] {
+                return fixture.worker->stats().submitted_access_units == 1;
+            }),
+            "terminal stall test must produce an initial output");
+
+    std::this_thread::sleep_for(10ms);
+    require(fixture.worker->stop().has_value(),
+            "terminal stall test session must stop");
+
+    const auto stats = fixture.worker->stats();
+    require(stats.terminal_output_gap.has_value() &&
+                *stats.terminal_output_gap > 1ms &&
+                stats.maximum_output_gap.has_value() &&
+                *stats.maximum_output_gap >= *stats.terminal_output_gap &&
+                stats.output_stall_events == 1 &&
+                stats.output_stall_excess_total >
+                    std::chrono::nanoseconds::zero(),
+            "session end must account for the final output stall");
 }
 
 void input_open_failure_rolls_back_output_and_allows_retry() {
@@ -491,6 +520,7 @@ int main() {
     try {
         drives_the_complete_pipeline_on_one_worker_thread();
         backpressure_discards_until_the_next_random_access_point();
+        session_end_accounts_for_an_unrecovered_output_stall();
         input_open_failure_rolls_back_output_and_allows_retry();
         output_open_failure_never_starts_the_input();
         runtime_input_failure_aborts_and_requires_stop_acknowledgement();

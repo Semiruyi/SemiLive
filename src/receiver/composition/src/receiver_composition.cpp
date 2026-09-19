@@ -79,7 +79,8 @@ ReceiverCompositionResult ReceiverComposition::Impl::assemble() {
             std::make_unique<infra::output::H264FileOutputBackend>(
                 config_.h264_output_path);
         domain::DefaultVideoReceiveWorkerConfig worker_config{
-            config_.input, config_.receive_poll_interval};
+            config_.input, config_.receive_poll_interval,
+            config_.output_stall_threshold};
         worker_ = std::make_unique<domain::DefaultVideoReceiveWorker>(
             std::move(worker_config), std::move(input), std::move(pipeline),
             std::move(output));

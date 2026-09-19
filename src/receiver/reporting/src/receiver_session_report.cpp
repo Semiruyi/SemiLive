@@ -152,7 +152,9 @@ void write_config(std::ostream& output,
     write_json_string(output, path_text(config.h264_output_path));
     output << ",\n"
               "    \"receive_poll_interval_ms\": "
-           << config.receive_poll_interval.count() << "\n"
+           << config.receive_poll_interval.count() << ",\n"
+              "    \"output_stall_threshold_ms\": "
+           << config.output_stall_threshold.count() << "\n"
               "  },\n";
 }
 
@@ -175,6 +177,13 @@ void write_session(std::ostream& output,
               "    \"maximum_output_gap_ms\": ";
     write_optional_duration(output, stats.maximum_output_gap);
     output << ",\n"
+              "    \"terminal_output_gap_ms\": ";
+    write_optional_duration(output, stats.terminal_output_gap);
+    output << ",\n"
+              "    \"output_stall_events\": "
+           << stats.output_stall_events << ",\n"
+              "    \"output_stall_excess_total_ms\": "
+           << milliseconds(stats.output_stall_excess_total) << ",\n"
               "    \"started_sessions\": "
            << stats.started_sessions << ",\n"
               "    \"completed_sessions\": "
@@ -190,6 +199,8 @@ void write_input(std::ostream& output, const Stats& stats) {
     output << "  \"input\": {\n"
               "    \"received_datagrams\": "
            << stats.received_datagrams << ",\n"
+              "    \"received_bytes\": "
+           << stats.received_bytes << ",\n"
               "    \"receive_timeouts\": "
            << stats.receive_timeouts << ",\n"
               "    \"bound_address\": ";
@@ -348,7 +359,16 @@ void write_h264(std::ostream& output, const Stats& stats) {
               "      \"wait_total_ms\": "
            << milliseconds(recovery.recovery_wait_total) << ",\n"
               "      \"wait_maximum_ms\": "
-           << milliseconds(recovery.recovery_wait_maximum) << "\n"
+           << milliseconds(recovery.recovery_wait_maximum) << ",\n"
+              "      \"active_wait_ms\": ";
+    write_optional_duration(output, recovery.active_recovery_wait);
+    output << ",\n"
+              "      \"wait_total_including_active_ms\": "
+           << milliseconds(recovery.recovery_wait_total_including_active)
+           << ",\n"
+              "      \"wait_maximum_including_active_ms\": "
+           << milliseconds(recovery.recovery_wait_maximum_including_active)
+           << "\n"
               "    }\n"
               "  },\n";
 }

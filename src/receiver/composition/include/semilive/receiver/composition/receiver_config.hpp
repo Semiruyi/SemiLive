@@ -13,6 +13,7 @@ struct ReceiverConfig {
     domain::H264RtpReceivePipelineConfig pipeline;
     std::filesystem::path h264_output_path{"semilive-received.h264"};
     std::chrono::milliseconds receive_poll_interval{10};
+    std::chrono::milliseconds output_stall_threshold{100};
 };
 
 }  // namespace semilive::receiver::composition

@@ -89,12 +89,13 @@ ctest --preset linux-debug
   --bind-address 0.0.0.0 \
   --bind-port 5004 \
   --output semilive-received.h264 \
+  --output-stall-threshold-ms 100 \
   --stats-json receiver-stats.json
 ```
 
 Receiver 正常停止后会写出机器可读的会话配置、RTP 重排与确认丢包、H.264 解包与 AU 丢弃、
-随机访问恢复次数/耗时，以及首个输出和最大输出间隔等基线指标。启动阶段等待第一个 IDR 不计入
-弱网恢复 episode。
+随机访问恢复次数/耗时，以及首个输出、输出停顿和会话结束时尾部间隔等基线指标。启动阶段等待
+第一个 IDR 不计入弱网恢复 episode；未完成的恢复等待会单独记录，不冒充已完成恢复。
 
 再启动 Publisher；按 Ctrl+C 正常停止两个进程：
 
@@ -102,8 +103,12 @@ Receiver 正常停止后会写出机器可读的会话配置、RTP 重排与确�
 ./build/windows-debug/bin/semilive_publisher.exe --help
 ./build/windows-debug/bin/semilive_publisher.exe \
   --rtp-address 127.0.0.1 \
-  --rtp-port 5004
+  --rtp-port 5004 \
+  --stats-json publisher-stats.json
 ```
+
+Publisher 正常停止后会写出视频/GOP/码率和 RTP 配置，以及采集帧、编码 AU、关键帧、原始媒体
+RTP datagram 与字节数，作为 Receiver 丢包率和后续反馈/重传开销的发送端分母。
 
 当前接收结果用于协议闭环验证，可使用 FFmpeg/ffprobe 检查。Relay 目前仍是占位程序：
 
