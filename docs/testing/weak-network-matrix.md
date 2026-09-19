@@ -117,6 +117,7 @@ WebRTC 报告至少区分：
 | RTX overhead | RTX 字节数 / 原始媒体 RTP 字节数 |
 | Recovery time | 首次确认连续性破坏到首个恢复输出 AU 的单调时间差 |
 | Damaged AU | 因缺包、FU-A损坏或不完整边界而拒绝的 AU 数 |
+| Receiver output gap | Receiver 连续两次成功提交 AU 的最大墙钟间隔；文件输出阶段仅作为链路停顿代理 |
 | Freeze count | 播放输出间隔超过预先声明阈值的事件数 |
 | Freeze duration | 冻结事件超过正常帧间隔部分的累计时间 |
 | End-to-end latency | 可验证采集标记到显示该标记的时间差 |
@@ -125,6 +126,7 @@ WebRTC 报告至少区分：
 
 恢复率只针对 eligible missing，避免把已经过期或已从历史缓存淘汰的包计入分母后误解机制效果。
 网络 jitter、接收重排等待和播放器缓冲延迟必须分别报告。
+Receiver output gap 不等同于播放器 Freeze；接入实际播放与画面观测前，报告不得混用两个名称。
 
 ## 7. 通过条件
 

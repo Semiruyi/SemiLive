@@ -88,8 +88,13 @@ ctest --preset linux-debug
 ./build/windows-debug/bin/semilive_receiver.exe \
   --bind-address 0.0.0.0 \
   --bind-port 5004 \
-  --output semilive-received.h264
+  --output semilive-received.h264 \
+  --stats-json receiver-stats.json
 ```
+
+Receiver 正常停止后会写出机器可读的会话配置、RTP 重排与确认丢包、H.264 解包与 AU 丢弃、
+随机访问恢复次数/耗时，以及首个输出和最大输出间隔等基线指标。启动阶段等待第一个 IDR 不计入
+弱网恢复 episode。
 
 再启动 Publisher；按 Ctrl+C 正常停止两个进程：
 

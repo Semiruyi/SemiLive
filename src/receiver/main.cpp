@@ -1,5 +1,6 @@
 #include <semilive/common/log/log.hpp>
 #include <semilive/receiver/composition/receiver_composition.hpp>
+#include <semilive/receiver/reporting/receiver_session_report.hpp>
 
 #include <charconv>
 #include <chrono>
@@ -27,6 +28,7 @@ using namespace std::chrono_literals;
 namespace app = semilive::receiver::application;
 namespace composition = semilive::receiver::composition;
 namespace domain = semilive::receiver::domain;
+namespace reporting = semilive::receiver::reporting;
 
 volatile std::sig_atomic_t stop_requested = 0;
 
@@ -43,6 +45,7 @@ enum class CommandLineAction : std::uint8_t {
 struct CommandLineOptions {
     CommandLineAction action = CommandLineAction::Run;
     composition::ReceiverConfig receiver;
+    std::optional<std::filesystem::path> stats_json_path;
 };
 
 using CommandLineResult = std::expected<CommandLineOptions, std::string>;
@@ -83,6 +86,9 @@ void print_help() {
            "                                   existing file is replaced)\n"
            "  --poll-interval-ms MS           Receive/timer poll interval\n"
            "                                  (default: 10, range: 1..1000)\n"
+           "  --stats-json PATH               Write final session statistics "
+           "as JSON\n"
+           "                                  (existing file is replaced)\n"
            "  --help                          Show this help\n"
            "  --version                       Show the version\n";
 }
@@ -99,6 +105,21 @@ void print_help() {
     return value;
 }
 
+[[nodiscard]] bool same_normalized_path(
+    const std::filesystem::path& left,
+    const std::filesystem::path& right) {
+    std::error_code left_error;
+    std::error_code right_error;
+    const auto normalized_left =
+        std::filesystem::absolute(left, left_error).lexically_normal();
+    const auto normalized_right =
+        std::filesystem::absolute(right, right_error).lexically_normal();
+    if (left_error || right_error) {
+        return left.lexically_normal() == right.lexically_normal();
+    }
+    return normalized_left == normalized_right;
+}
+
 CommandLineResult parse_command_line(const int argc, char* argv[]) {
     CommandLineOptions options;
     bool bind_address_set = false;
@@ -109,6 +130,7 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
     bool receive_buffer_set = false;
     bool output_set = false;
     bool poll_interval_set = false;
+    bool stats_json_set = false;
 
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{argv[index]};
@@ -278,8 +300,28 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
             continue;
         }
 
+        if (argument == "--stats-json") {
+            if (stats_json_set) {
+                return std::unexpected{
+                    "--stats-json may only be specified once"};
+            }
+            if (++index >= argc || std::string_view{argv[index]}.empty()) {
+                return std::unexpected{"--stats-json requires a path"};
+            }
+            options.stats_json_path = std::filesystem::path{argv[index]};
+            stats_json_set = true;
+            continue;
+        }
+
         return std::unexpected{"unknown argument: " +
                                std::string{argument}};
+    }
+
+    if (options.stats_json_path &&
+        same_normalized_path(*options.stats_json_path,
+                             options.receiver.h264_output_path)) {
+        return std::unexpected{
+            "--stats-json must not use the H.264 output path"};
     }
 
     return options;
@@ -373,8 +415,17 @@ void print_started(const app::ReceiverStarted& started,
 
 void print_final_stats(const app::ReceiverControllerStats& stats) {
     const auto& pipeline = stats.pipeline;
+    const auto duration_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            stats.session_duration)
+            .count();
+    const auto recovery_wait_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            pipeline.recovery.recovery_wait_total)
+            .count();
     std::cout << "Receiver statistics\n"
               << "  session: " << stats.session_id << '\n'
+              << "  duration: " << duration_ms << " ms\n"
               << "  input: " << stats.received_datagrams
               << " datagrams, " << stats.receive_timeouts << " timeouts, "
               << pipeline.parse_failures << " malformed, "
@@ -386,7 +437,11 @@ void print_final_stats(const app::ReceiverControllerStats& stats) {
               << "  recovery: " << pipeline.recovery.recovery_points
               << " recovery points, "
               << pipeline.recovery.dropped_while_waiting
-              << " AUs dropped while waiting\n"
+              << " AUs dropped while waiting, "
+              << pipeline.recovery.recovery_episodes_completed << "/"
+              << pipeline.recovery.recovery_episodes_started
+              << " episodes completed, " << recovery_wait_ms
+              << " ms total wait\n"
               << "  output: " << stats.submitted_access_units << " AUs, "
               << stats.submitted_bytes << " bytes, "
               << stats.backpressure_drops << " backpressure drops\n";
@@ -395,6 +450,8 @@ void print_final_stats(const app::ReceiverControllerStats& stats) {
         "receiver session {} final stats: datagrams={}, timeouts={}, "
         "parse_failures={}, session_drops={}, reordered={}, gaps={}, "
         "lost_packets={}, recovery_points={}, recovery_drops={}, "
+        "recovery_episodes_started={}, recovery_episodes_completed={}, "
+        "recovery_wait_ms={}, session_duration_ms={}, "
         "output_units={}, output_bytes={}, backpressure_drops={}",
         stats.session_id, stats.received_datagrams, stats.receive_timeouts,
         pipeline.parse_failures, pipeline.session_drops,
@@ -403,6 +460,9 @@ void print_final_stats(const app::ReceiverControllerStats& stats) {
         pipeline.reorder.confirmed_lost_packets,
         pipeline.recovery.recovery_points,
         pipeline.recovery.dropped_while_waiting,
+        pipeline.recovery.recovery_episodes_started,
+        pipeline.recovery.recovery_episodes_completed,
+        recovery_wait_ms, duration_ms,
         stats.submitted_access_units, stats.submitted_bytes,
         stats.backpressure_drops);
 }
@@ -417,7 +477,9 @@ void print_final_stats(const app::ReceiverControllerStats& stats) {
     return false;
 }
 
-int run_receiver(composition::ReceiverConfig config) {
+int run_receiver(composition::ReceiverConfig config,
+                 const std::optional<std::filesystem::path>& stats_json_path) {
+    const auto report_config = config;
     composition::ReceiverComposition graph{std::move(config)};
     const auto assembled = graph.assemble();
     if (!assembled) {
@@ -476,9 +538,24 @@ int run_receiver(composition::ReceiverConfig config) {
         succeeded = false;
     }
 
-    print_final_stats(controller->stats());
+    const auto final_stats = controller->stats();
+    print_final_stats(final_stats);
     if (!dispose_composition(graph)) {
         succeeded = false;
+    }
+
+    if (stats_json_path) {
+        const reporting::ReceiverSessionReport report{
+            report_config, final_stats, succeeded};
+        const auto written = reporting::write_receiver_session_report_json(
+            *stats_json_path, report);
+        if (!written) {
+            std::cerr << written.error() << '\n';
+            SEMILIVE_LOG_ERROR("{}", written.error());
+            succeeded = false;
+        } else {
+            std::cout << "  stats: " << stats_json_path->string() << '\n';
+        }
     }
     return succeeded ? EXIT_SUCCESS : EXIT_FAILURE;
 }
@@ -518,7 +595,8 @@ int main(int argc, char* argv[]) {
     }
 
     try {
-        const auto result = run_receiver(options->receiver);
+        const auto result =
+            run_receiver(options->receiver, options->stats_json_path);
         SEMILIVE_LOG_INFO("receiver process stopped with exit code {}",
                           result);
         return result;

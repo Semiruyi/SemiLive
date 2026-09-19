@@ -17,6 +17,12 @@ namespace {
 namespace domain = semilive::receiver::domain;
 namespace model = semilive::receiver::model;
 
+using Clock = domain::H264RecoveryGate::Clock;
+
+[[nodiscard]] Clock::time_point at(const std::int64_t milliseconds) {
+    return Clock::time_point{std::chrono::milliseconds{milliseconds}};
+}
+
 void require(const bool condition, const std::string_view message) {
     if (!condition) {
         throw std::runtime_error{std::string{message}};
@@ -58,12 +64,15 @@ void startup_waits_for_a_complete_random_access_candidate() {
     require(gate.state() ==
                 domain::H264RecoveryState::WaitingForRandomAccess,
             "gate must start in recovery mode");
-    require(!gate.consume(access_unit_event(1000, false, false, false)),
+    require(!gate.consume(access_unit_event(1000, false, false, false),
+                          at(10)),
             "ordinary AU must be dropped during startup");
-    require(!gate.consume(access_unit_event(2000, true, false, false)),
+    require(!gate.consume(access_unit_event(2000, true, false, false),
+                          at(20)),
             "IDR without parameter sets must not recover playback");
 
-    auto recovered = gate.consume(access_unit_event(3000, true, true, true));
+    auto recovered = gate.consume(access_unit_event(3000, true, true, true),
+                                  at(30));
     require(recovered.has_value(),
             "SPS/PPS/IDR AU must recover playback");
     require(recovered->discontinuity_before(),
@@ -77,14 +86,15 @@ void startup_waits_for_a_complete_random_access_candidate() {
 void streaming_passes_complete_access_units_without_spurious_resets() {
     domain::H264RecoveryGate gate;
     static_cast<void>(
-        gate.consume(access_unit_event(4000, true, true, true)));
+        gate.consume(access_unit_event(4000, true, true, true), at(40)));
 
-    auto ordinary = gate.consume(access_unit_event(5000, false, false, false));
+    auto ordinary = gate.consume(access_unit_event(5000, false, false, false),
+                                 at(50));
     require(ordinary && !ordinary->discontinuity_before(),
             "ordinary AU must pass without a decoder refresh in streaming");
 
     auto periodic_idr =
-        gate.consume(access_unit_event(6000, true, true, true));
+        gate.consume(access_unit_event(6000, true, true, true), at(60));
     require(periodic_idr && !periodic_idr->discontinuity_before(),
             "healthy periodic IDR must not trigger a decoder refresh");
 }
@@ -92,17 +102,19 @@ void streaming_passes_complete_access_units_without_spurious_resets() {
 void assembler_discontinuity_waits_until_the_next_recovery_point() {
     domain::H264RecoveryGate gate;
     static_cast<void>(
-        gate.consume(access_unit_event(7000, true, true, true)));
+        gate.consume(access_unit_event(7000, true, true, true), at(70)));
 
-    require(!gate.consume(discontinuity_event()),
+    require(!gate.consume(discontinuity_event(), at(80)),
             "discontinuity must be retained instead of emitted alone");
     require(gate.state() ==
                 domain::H264RecoveryState::WaitingForRandomAccess,
             "assembler discontinuity must re-enter recovery mode");
-    require(!gate.consume(access_unit_event(8000, false, false, false)),
+    require(!gate.consume(access_unit_event(8000, false, false, false),
+                          at(90)),
             "post-loss inter frame must be dropped");
 
-    auto recovered = gate.consume(access_unit_event(9000, true, true, true));
+    auto recovered = gate.consume(access_unit_event(9000, true, true, true),
+                                  at(120));
     require(recovered && recovered->discontinuity_before(),
             "first complete random access AU after loss must carry refresh");
 
@@ -110,31 +122,42 @@ void assembler_discontinuity_waits_until_the_next_recovery_point() {
     require(stats.assembler_discontinuities == 1 &&
                 stats.dropped_while_waiting == 1 &&
                 stats.recovery_points == 2 &&
+                stats.recovery_episodes_started == 1 &&
+                stats.recovery_episodes_completed == 1 &&
+                stats.recovery_wait_total == std::chrono::milliseconds{40} &&
+                stats.recovery_wait_maximum ==
+                    std::chrono::milliseconds{40} &&
                 stats.delivered_access_units == 2,
-            "recovery statistics must include startup and post-loss cycles");
+            "recovery statistics must exclude startup and time post-loss cycles");
 }
 
 void external_output_loss_uses_the_same_recovery_policy() {
     domain::H264RecoveryGate gate;
     static_cast<void>(
-        gate.consume(access_unit_event(10'000, true, true, true)));
+        gate.consume(access_unit_event(10'000, true, true, true), at(10)));
 
-    gate.require_random_access();
-    require(!gate.consume(access_unit_event(11'000, false, false, false)),
+    gate.require_random_access(at(20));
+    gate.require_random_access(at(25));
+    require(!gate.consume(access_unit_event(11'000, false, false, false),
+                          at(30)),
             "output loss must suppress dependent frames");
     auto recovered =
-        gate.consume(access_unit_event(12'000, true, true, true));
+        gate.consume(access_unit_event(12'000, true, true, true), at(50));
     require(recovered && recovered->discontinuity_before(),
             "output loss must recover with the same atomic refresh contract");
-    require(gate.stats().external_discontinuities == 1,
-            "external recovery requests must be observable");
+    const auto stats = gate.stats();
+    require(stats.external_discontinuities == 2 &&
+                stats.recovery_episodes_started == 1 &&
+                stats.recovery_episodes_completed == 1 &&
+                stats.recovery_wait_total == std::chrono::milliseconds{30},
+            "repeated recovery requests must be observable without restarting timing");
 }
 
 void reset_restores_new_session_state_and_statistics() {
     domain::H264RecoveryGate gate;
     static_cast<void>(
-        gate.consume(access_unit_event(13'000, true, true, true)));
-    gate.require_random_access();
+        gate.consume(access_unit_event(13'000, true, true, true), at(10)));
+    gate.require_random_access(at(20));
     gate.reset();
 
     const auto stats = gate.stats();
@@ -143,7 +166,10 @@ void reset_restores_new_session_state_and_statistics() {
                 stats.external_discontinuities == 0 &&
                 stats.dropped_while_waiting == 0 &&
                 stats.delivered_access_units == 0 &&
-                stats.recovery_points == 0,
+                stats.recovery_points == 0 &&
+                stats.recovery_episodes_started == 0 &&
+                stats.recovery_episodes_completed == 0 &&
+                stats.recovery_wait_total == std::chrono::nanoseconds::zero(),
             "reset must clear per-session statistics");
     require(stats.state ==
                 domain::H264RecoveryState::WaitingForRandomAccess,

@@ -70,7 +70,7 @@ public:
 
     // Used by the worker when a complete AU is lost after leaving the
     // pipeline, such as output queue backpressure.
-    void require_random_access() noexcept;
+    void require_random_access(Clock::time_point observed_at) noexcept;
 
     [[nodiscard]] H264RtpReceivePipelineStats stats() const noexcept;
     void reset() noexcept;

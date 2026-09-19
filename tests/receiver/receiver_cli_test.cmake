@@ -123,6 +123,54 @@ if(output_result EQUAL 0 OR
 endif()
 
 execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}" --stats-json
+    RESULT_VARIABLE stats_path_result
+    OUTPUT_VARIABLE stats_path_stdout
+    ERROR_VARIABLE stats_path_stderr
+)
+if(stats_path_result EQUAL 0 OR
+   NOT stats_path_stderr MATCHES "--stats-json requires a path")
+    message(FATAL_ERROR
+        "receiver accepted missing stats path: result=${stats_path_result}, "
+        "stdout=${stats_path_stdout}, stderr=${stats_path_stderr}"
+    )
+endif()
+
+execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}"
+            --stats-json first.json --stats-json second.json
+    RESULT_VARIABLE duplicate_stats_result
+    OUTPUT_VARIABLE duplicate_stats_stdout
+    ERROR_VARIABLE duplicate_stats_stderr
+)
+if(duplicate_stats_result EQUAL 0 OR
+   NOT duplicate_stats_stderr MATCHES
+       "--stats-json may only be specified once")
+    message(FATAL_ERROR
+        "receiver accepted duplicate stats path: "
+        "result=${duplicate_stats_result}, stdout=${duplicate_stats_stdout}, "
+        "stderr=${duplicate_stats_stderr}"
+    )
+endif()
+
+execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}"
+            --output same-output --stats-json same-output
+    RESULT_VARIABLE same_output_result
+    OUTPUT_VARIABLE same_output_stdout
+    ERROR_VARIABLE same_output_stderr
+)
+if(same_output_result EQUAL 0 OR
+   NOT same_output_stderr MATCHES
+       "--stats-json must not use the H.264 output path")
+    message(FATAL_ERROR
+        "receiver accepted overlapping media and stats paths: "
+        "result=${same_output_result}, stdout=${same_output_stdout}, "
+        "stderr=${same_output_stderr}"
+    )
+endif()
+
+execute_process(
     COMMAND "${SEMILIVE_RECEIVER}" --bind-port 5004 --bind-port 5005
     RESULT_VARIABLE duplicate_result
     OUTPUT_VARIABLE duplicate_stdout

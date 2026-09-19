@@ -1,5 +1,7 @@
 #include <semilive/receiver/domain/worker/default_video_receive_worker.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <exception>
 #include <mutex>
@@ -48,6 +50,8 @@ validate_default_video_receive_worker_config(
 }
 
 struct DefaultVideoReceiveWorker::Impl {
+    using Clock = H264RtpReceivePipeline::Clock;
+
     Impl(DefaultVideoReceiveWorkerConfig config,
          std::unique_ptr<input_contract::DatagramSourceBackend> input,
          std::unique_ptr<H264RtpReceivePipeline> pipeline,
@@ -89,6 +93,7 @@ struct DefaultVideoReceiveWorker::Impl {
     void finish_start_failure(VideoReceiveWorkerIssue issue) noexcept;
     void fail_running_session(VideoReceiveWorkerIssue issue) noexcept;
     void publish_pipeline_stats() noexcept;
+    void finish_session_timing() noexcept;
     void close_session(output_contract::LiveVideoOutputCloseMode mode) noexcept;
     void stop_noexcept() noexcept;
 
@@ -104,6 +109,8 @@ struct DefaultVideoReceiveWorker::Impl {
     std::jthread thread_;
     VideoReceiveWorkerStats stats_;
     std::optional<VideoReceiveWorkerIssue> last_issue_;
+    std::optional<Clock::time_point> session_started_at_;
+    std::optional<Clock::time_point> last_output_at_;
 };
 
 VideoReceiveStartResult DefaultVideoReceiveWorker::Impl::start() {
@@ -128,9 +135,14 @@ VideoReceiveStartResult DefaultVideoReceiveWorker::Impl::start() {
     stats_.submitted_bytes = 0;
     stats_.backpressure_drops = 0;
     stats_.discarded_after_backpressure = 0;
+    stats_.session_duration = std::chrono::nanoseconds::zero();
+    stats_.first_output_delay.reset();
+    stats_.maximum_output_gap.reset();
     stats_.input.reset();
     stats_.output.reset();
     stats_.pipeline = {};
+    session_started_at_.reset();
+    last_output_at_.reset();
     last_issue_.reset();
 
     try {
@@ -209,7 +221,13 @@ VideoReceiveWorkerState DefaultVideoReceiveWorker::Impl::state() const noexcept 
 
 VideoReceiveWorkerStats DefaultVideoReceiveWorker::Impl::stats() const noexcept {
     std::lock_guard lock{mutex_};
-    return stats_;
+    auto snapshot = stats_;
+    if (session_started_at_) {
+        snapshot.session_duration =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                Clock::now() - *session_started_at_);
+    }
+    return snapshot;
 }
 
 VideoReceiveWaitResult
@@ -421,7 +439,8 @@ DefaultVideoReceiveWorker::Impl::submit_outputs(
 
         if (submitted->status ==
             output_contract::LiveVideoSubmitStatus::DroppedBackpressure) {
-            pipeline_->require_random_access();
+            pipeline_->require_random_access(
+                H264RtpReceivePipeline::Clock::now());
             {
                 std::lock_guard lock{mutex_};
                 ++stats_.backpressure_drops;
@@ -437,9 +456,27 @@ DefaultVideoReceiveWorker::Impl::submit_outputs(
                 VideoReceiveWorkerOperation::SubmitOutput,
                 "video output accepted a partial H.264 access unit");
         }
+        const auto accepted_at = Clock::now();
         std::lock_guard lock{mutex_};
         ++stats_.submitted_access_units;
         stats_.submitted_bytes += submitted->accepted_bytes;
+        if (!stats_.first_output_delay && session_started_at_) {
+            stats_.first_output_delay =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::max(Clock::duration::zero(),
+                             accepted_at - *session_started_at_));
+        }
+        if (last_output_at_) {
+            const auto gap =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::max(Clock::duration::zero(),
+                             accepted_at - *last_output_at_));
+            if (!stats_.maximum_output_gap ||
+                gap > *stats_.maximum_output_gap) {
+                stats_.maximum_output_gap = gap;
+            }
+        }
+        last_output_at_ = accepted_at;
     }
     return std::nullopt;
 }
@@ -453,6 +490,8 @@ bool DefaultVideoReceiveWorker::Impl::finish_start_success(
     }
     stats_.input = std::move(input_info);
     stats_.output = std::move(output_info);
+    session_started_at_ = Clock::now();
+    last_output_at_.reset();
     stats_.state = VideoReceiveWorkerState::Running;
     ++stats_.started_sessions;
     state_changed_.notify_all();
@@ -491,8 +530,22 @@ void DefaultVideoReceiveWorker::Impl::publish_pipeline_stats() noexcept {
     stats_.pipeline = pipeline_stats;
 }
 
+void DefaultVideoReceiveWorker::Impl::finish_session_timing() noexcept {
+    const auto finished_at = Clock::now();
+    std::lock_guard lock{mutex_};
+    if (!session_started_at_) {
+        return;
+    }
+    stats_.session_duration =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::max(Clock::duration::zero(),
+                     finished_at - *session_started_at_));
+    session_started_at_.reset();
+}
+
 void DefaultVideoReceiveWorker::Impl::close_session(
     const output_contract::LiveVideoOutputCloseMode mode) noexcept {
+    finish_session_timing();
     if (input_open_) {
         input_->close();
         input_open_ = false;

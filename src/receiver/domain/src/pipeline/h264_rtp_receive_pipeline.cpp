@@ -57,19 +57,23 @@ struct H264RtpReceivePipeline::Impl {
     [[nodiscard]] H264RtpReceivePipelineOutputs push(
         model::UdpDatagram datagram);
     [[nodiscard]] H264RtpReceivePipelineOutputs poll(Clock::time_point now);
-    void require_random_access() noexcept;
+    void require_random_access(Clock::time_point observed_at) noexcept;
     [[nodiscard]] H264RtpReceivePipelineStats stats() const noexcept;
     void reset() noexcept;
 
     [[nodiscard]] H264RtpReceivePipelineOutputs process(
-        RtpReorderEvents events);
+        RtpReorderEvents events,
+        Clock::time_point observed_at);
     void process_reorder_event(RtpReorderEvent event,
+                               Clock::time_point observed_at,
                                H264RtpReceivePipelineOutputs& outputs);
     void process_depacketizer_event(
         H264DepacketizerEvent event,
+        Clock::time_point observed_at,
         H264RtpReceivePipelineOutputs& outputs);
     void process_assembler_event(
         H264AccessUnitAssemblerEvent event,
+        Clock::time_point observed_at,
         H264RtpReceivePipelineOutputs& outputs);
 
     RtpParser parser_;
@@ -89,6 +93,7 @@ struct H264RtpReceivePipeline::Impl {
 H264RtpReceivePipelineOutputs H264RtpReceivePipeline::Impl::push(
     model::UdpDatagram datagram) {
     ++received_datagrams_;
+    const auto observed_at = datagram.received_at;
     auto parsed = parser_.parse(std::move(datagram));
     if (!parsed) {
         ++parse_failures_;
@@ -101,16 +106,17 @@ H264RtpReceivePipelineOutputs H264RtpReceivePipeline::Impl::push(
         ++session_drops_;
         return {};
     }
-    return process(reorder_.push(std::move(accepted->packet)));
+    return process(reorder_.push(std::move(accepted->packet)), observed_at);
 }
 
 H264RtpReceivePipelineOutputs H264RtpReceivePipeline::Impl::poll(
     const Clock::time_point now) {
-    return process(reorder_.poll(now));
+    return process(reorder_.poll(now), now);
 }
 
-void H264RtpReceivePipeline::Impl::require_random_access() noexcept {
-    recovery_gate_.require_random_access();
+void H264RtpReceivePipeline::Impl::require_random_access(
+    const Clock::time_point observed_at) noexcept {
+    recovery_gate_.require_random_access(observed_at);
 }
 
 H264RtpReceivePipelineStats
@@ -145,36 +151,42 @@ void H264RtpReceivePipeline::Impl::reset() noexcept {
 }
 
 H264RtpReceivePipelineOutputs H264RtpReceivePipeline::Impl::process(
-    RtpReorderEvents events) {
+    RtpReorderEvents events,
+    const Clock::time_point observed_at) {
     H264RtpReceivePipelineOutputs outputs;
     for (auto& event : events) {
-        process_reorder_event(std::move(event), outputs);
+        process_reorder_event(std::move(event), observed_at, outputs);
     }
     return outputs;
 }
 
 void H264RtpReceivePipeline::Impl::process_reorder_event(
     RtpReorderEvent event,
+    const Clock::time_point observed_at,
     H264RtpReceivePipelineOutputs& outputs) {
     auto depacketizer_events = depacketizer_.consume(std::move(event));
     for (auto& depacketizer_event : depacketizer_events) {
-        process_depacketizer_event(std::move(depacketizer_event), outputs);
+        process_depacketizer_event(std::move(depacketizer_event), observed_at,
+                                   outputs);
     }
 }
 
 void H264RtpReceivePipeline::Impl::process_depacketizer_event(
     H264DepacketizerEvent event,
+    const Clock::time_point observed_at,
     H264RtpReceivePipelineOutputs& outputs) {
     auto assembler_events = assembler_.consume(std::move(event));
     for (auto& assembler_event : assembler_events) {
-        process_assembler_event(std::move(assembler_event), outputs);
+        process_assembler_event(std::move(assembler_event), observed_at,
+                                outputs);
     }
 }
 
 void H264RtpReceivePipeline::Impl::process_assembler_event(
     H264AccessUnitAssemblerEvent event,
+    const Clock::time_point observed_at,
     H264RtpReceivePipelineOutputs& outputs) {
-    auto playable = recovery_gate_.consume(std::move(event));
+    auto playable = recovery_gate_.consume(std::move(event), observed_at);
     if (!playable) {
         return;
     }
@@ -182,7 +194,7 @@ void H264RtpReceivePipeline::Impl::process_assembler_event(
     auto mapped = timestamp_mapper_.map(std::move(*playable));
     if (!mapped) {
         ++timestamp_mapping_failures_;
-        recovery_gate_.require_random_access();
+        recovery_gate_.require_random_access(observed_at);
         return;
     }
 
@@ -217,8 +229,9 @@ H264RtpReceivePipelineOutputs H264RtpReceivePipeline::poll(
     return impl_->poll(now);
 }
 
-void H264RtpReceivePipeline::require_random_access() noexcept {
-    impl_->require_random_access();
+void H264RtpReceivePipeline::require_random_access(
+    const Clock::time_point observed_at) noexcept {
+    impl_->require_random_access(observed_at);
 }
 
 H264RtpReceivePipelineStats H264RtpReceivePipeline::stats() const noexcept {

@@ -1,15 +1,18 @@
 #include <semilive/receiver/domain/h264/h264_recovery_gate.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <utility>
 #include <variant>
 
 namespace semilive::receiver::domain {
 
 std::optional<model::PlayableH264AccessUnit> H264RecoveryGate::consume(
-    H264AccessUnitAssemblerEvent event) {
+    H264AccessUnitAssemblerEvent event,
+    const Clock::time_point observed_at) {
     if (std::holds_alternative<H264AccessUnitDiscontinuity>(event)) {
         ++stats_.assembler_discontinuities;
-        state_ = H264RecoveryState::WaitingForRandomAccess;
+        enter_recovery(observed_at);
         return std::nullopt;
     }
 
@@ -21,7 +24,19 @@ std::optional<model::PlayableH264AccessUnit> H264RecoveryGate::consume(
             return std::nullopt;
         }
 
+        if (recovery_started_at_) {
+            const auto wait = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::max(Clock::duration::zero(),
+                         observed_at - *recovery_started_at_));
+            ++stats_.recovery_episodes_completed;
+            stats_.recovery_wait_total += wait;
+            stats_.recovery_wait_maximum =
+                std::max(stats_.recovery_wait_maximum, wait);
+            recovery_started_at_.reset();
+        }
+
         state_ = H264RecoveryState::Streaming;
+        has_streamed_ = true;
         ++stats_.recovery_points;
         ++stats_.delivered_access_units;
         return model::PlayableH264AccessUnit{std::move(access_unit), true};
@@ -31,8 +46,18 @@ std::optional<model::PlayableH264AccessUnit> H264RecoveryGate::consume(
     return model::PlayableH264AccessUnit{std::move(access_unit), false};
 }
 
-void H264RecoveryGate::require_random_access() noexcept {
+void H264RecoveryGate::require_random_access(
+    const Clock::time_point observed_at) noexcept {
     ++stats_.external_discontinuities;
+    enter_recovery(observed_at);
+}
+
+void H264RecoveryGate::enter_recovery(
+    const Clock::time_point observed_at) noexcept {
+    if (state_ == H264RecoveryState::Streaming && has_streamed_) {
+        ++stats_.recovery_episodes_started;
+        recovery_started_at_ = observed_at;
+    }
     state_ = H264RecoveryState::WaitingForRandomAccess;
 }
 
@@ -49,6 +74,8 @@ H264RecoveryState H264RecoveryGate::state() const noexcept {
 void H264RecoveryGate::reset() noexcept {
     state_ = H264RecoveryState::WaitingForRandomAccess;
     stats_ = {};
+    has_streamed_ = false;
+    recovery_started_at_.reset();
 }
 
 }  // namespace semilive::receiver::domain

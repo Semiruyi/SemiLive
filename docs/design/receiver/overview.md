@@ -45,9 +45,10 @@ Main
       -> LiveVideoOutputBackend
          -> Annex-B file output（阶段验证）
          -> SemiPlayer adapter（最终输出）
+-> ReceiverSessionReport（可选最终 JSON）
 ```
 
-架构分为五层：
+架构按运行职责分层，并提供不进入媒体热路径的报告模块：
 
 | 层次 | 职责 |
 |---|---|
@@ -57,6 +58,7 @@ Main
 | Application | 通过 ReceiverController 管理接收会话，不处理媒体数据 |
 | Infrastructure | 实现 UDP Socket、文件验证输出和 SemiPlayer 适配器 |
 | Composition | 校验配置、选择具体后端、构造对象图并保证逆序释放 |
+| Reporting | 在会话结束后把配置与最终统计序列化为机器可读 JSON |
 
 Receiver 不依赖 Publisher namespace。双方协议约定一致，但代码依赖保持独立。只有多个程序长期
 共享且边界稳定的类型或算法，才在后续提取到 Common，首版不为复用预先建立通用媒体框架。
@@ -114,6 +116,16 @@ Controller 只提供接收会话的启动、停止、状态、等待和统计接
 运行期结果由 Worker 的会话状态通知等待者。
 
 后续加入音频时，Controller 再负责协调音视频 Worker 的共同启动、停止和失败策略。
+
+### 3.6 Session Reporting
+
+`ReceiverSessionReport` 不参与收包、重排或输出，也不由 Domain 调用。Main 在 Receiver 停止并取得
+不可变统计快照后，按 `--stats-json` 配置写出会话配置、RTP/H.264 计数、输出计数和单调时钟指标。
+
+启动时等待第一个完整 SPS/PPS/IDR 计入 `first_output_delay`，但不计为弱网恢复 episode。只有已经
+进入 Streaming 后再次进入 `WaitingForRandomAccess`，才开始一次恢复计时；重复 discontinuity 不
+重置开始时间。`maximum_output_gap` 是 Receiver 成功提交 AU 的最大墙钟间隔，只作为当前文件输出
+阶段的链路停顿代理，不表述为播放器画面冻结。
 
 ## 4. 线程模型
 
@@ -211,6 +223,7 @@ SemiLive::ReceiverInfraFileOutput
 SemiLive::ReceiverInfraSemiPlayer
 SemiLive::ReceiverInfrastructure
 SemiLive::ReceiverComposition
+SemiLive::ReceiverReporting
 SemiLive::ReceiverCore
 semilive_receiver
 ```
@@ -228,6 +241,8 @@ ReceiverApplication
     ^
 ReceiverComposition
     ^
+ReceiverReporting
+    ^
 ReceiverCore
     ^
 semilive_receiver
@@ -242,6 +257,7 @@ ReceiverInfraSemiPlayer ------> ReceiverContracts + ReceiverModel
                                  + SemiPlayer public SDK
 
 ReceiverComposition ----------> Application + Domain + concrete Infrastructure
+ReceiverReporting ------------> Composition + Application statistics
 ```
 
 约束：

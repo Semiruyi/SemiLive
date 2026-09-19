@@ -159,7 +159,10 @@ void confirmed_loss_discards_the_gop_and_recovers_at_the_next_idr() {
     const auto stats = pipeline.stats();
     require(stats.reorder.confirmed_lost_packets == 1 &&
                 stats.depacketizer.sequence_gaps == 1 &&
-                stats.recovery.recovery_points == 2,
+                stats.recovery.recovery_points == 2 &&
+                stats.recovery.recovery_episodes_started == 1 &&
+                stats.recovery.recovery_episodes_completed == 1 &&
+                stats.recovery.recovery_wait_total == 4ms,
             "loss must be visible through every affected pipeline stage");
 }
 
@@ -206,7 +209,7 @@ void timestamp_failure_forces_random_access_recovery() {
 void external_output_drop_and_reset_have_session_scoped_behavior() {
     domain::H264RtpReceivePipeline pipeline;
     static_cast<void>(push_random_access(pipeline, 40, 1'000));
-    pipeline.require_random_access();
+    pipeline.require_random_access(Clock::time_point{3ms});
     require(pipeline.push(datagram(43, 4'000, true, {0x61}, 3ms))
                 .empty(),
             "external output loss must close the recovery gate");

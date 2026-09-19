@@ -61,6 +61,9 @@ struct VideoReceiveWorkerStats {
     std::uint64_t submitted_bytes = 0;
     std::uint64_t backpressure_drops = 0;
     std::uint64_t discarded_after_backpressure = 0;
+    std::chrono::nanoseconds session_duration{};
+    std::optional<std::chrono::nanoseconds> first_output_delay;
+    std::optional<std::chrono::nanoseconds> maximum_output_gap;
     std::optional<contracts::network::DatagramSourceInfo> input;
     std::optional<contracts::output::LiveVideoOutputInfo> output;
     H264RtpReceivePipelineStats pipeline;

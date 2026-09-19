@@ -335,6 +335,12 @@ void drives_the_complete_pipeline_on_one_worker_thread() {
     }
     require(fixture.worker->stats().completed_sessions == 1,
             "normal stop must complete one session");
+    const auto stopped_stats = fixture.worker->stats();
+    require(stopped_stats.session_duration >
+                std::chrono::nanoseconds::zero() &&
+                stopped_stats.first_output_delay.has_value() &&
+                stopped_stats.maximum_output_gap.has_value(),
+            "worker must retain session and accepted-output timing metrics");
 }
 
 void backpressure_discards_until_the_next_random_access_point() {
