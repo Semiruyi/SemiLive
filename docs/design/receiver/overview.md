@@ -24,6 +24,8 @@ Receiver 的目标不是掩盖所有网络错误，而是：
 - Relay 后续负责会话管理和 RTP 转发，不参与解码，也不改变 Receiver 的输出契约。
 
 首版不实现完整 WebRTC、RTCP 反馈、重传、FEC、拥塞控制、自适应 jitter buffer、多路流和音频。
+RTCP、NACK/RTX 与 PLI 的后续范围和实施顺序见
+[RTCP 反馈与丢包恢复实施计划](../../plans/weak-network-transport.md)。
 
 ## 2. 总体架构
 

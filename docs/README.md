@@ -6,6 +6,18 @@
 
 - [项目路线图](roadmap.md)：项目阶段、交付物和完成条件。
 
+## 实施计划
+
+- [RTCP 反馈与丢包恢复计划](plans/weak-network-transport.md)：SR/RR、NACK/RTX、PLI、
+  有界缓存、指标和分阶段验收。
+- [WebRTC Native 实践计划](plans/webrtc-native.md)：C++ Native 客户端、浏览器互通、
+  ICE/STUN/TURN、DTLS-SRTP、统计和源码级交付物。
+
+## 测试
+
+- [弱网测试矩阵](testing/weak-network-matrix.md)：Clumsy/`tc netem` 测试拓扑、故障模型、
+  对照组、指标定义、报告格式和通过条件。
+
 ## 设计
 
 ### Publisher
@@ -39,7 +51,6 @@
 需要时再增加以下目录：
 
 - `adr/`：记录重要技术选择、备选方案和选择理由；
-- `testing/`：测试计划、弱网矩阵和稳定性验证方法；
 - `reports/`：带日期的性能、稳定性和兼容性测试结果；
 - `design/relay/`：Relay 进入设计阶段后创建。
 

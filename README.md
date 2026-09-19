@@ -7,17 +7,16 @@ SemiLive 是一个正在开发的 C++23 实时音视频项目，目标是完成�
 
 ## 当前状态
 
-项目已经完成 Publisher 视频采集、H.264 编码、RTP/UDP 输出、会话 Controller 和进程组合根。
-Windows Publisher 已接通 DXGI、FFmpeg/libx264、H.264 RTP 封包和 UDP 发送链路。
-Receiver 和 Relay 尚未形成可运行闭环：
+项目已经接通从 Windows 桌面采集到 H.264/RTP/UDP 文件接收的首条视频链路：
 
 - `semilive_publisher`：采集 Windows 桌面并向指定 UDP endpoint 发送 H.264 RTP；
-- `semilive_relay`：Linux 转发端占位程序；
-- `semilive_receiver`：接收端占位程序。
+- `semilive_receiver`：监听单路 H.264/RTP/UDP，完成 RTP 校验、有限重排、
+  Single NAL/FU-A 解包、Access Unit 组装和随机访问恢复，并输出 Annex-B 文件；
+- `semilive_relay`：Linux 转发端仍是占位程序。
 
-Publisher 首版音视频模块边界、线程模型、共享时间轴和运行语义已经确定，实施仍先完成
-视频闭环，详见 [Publisher 音视频设计](docs/design/publisher/overview.md)。Receiver 和 Relay 仍将在进入对应
-里程碑前单独设计。
+当前 Receiver 输出仍是阶段验证用的 Annex-B 文件，尚未接入 SemiPlayer 实时播放；系统音频、
+Linux Relay、RTCP 反馈、重传和 WebRTC 也尚未实现。当前能力和后续阶段以
+[项目路线图](docs/roadmap.md)为准。
 
 ## 项目目标
 
@@ -34,6 +33,7 @@ Publisher 首版音视频模块边界、线程模型、共享时间轴和运行�
 
 - 完整 WebRTC 协议栈；
 - NAT 穿透和公网信令；
+- 拥塞控制、FEC 和生产级弱网算法；
 - 多种编解码格式与协议同时支持；
 - Linux 桌面采集和完整播放器移植；
 - 生产级鉴权、集群调度和运维平台；
@@ -43,6 +43,7 @@ Publisher 首版音视频模块边界、线程模型、共享时间轴和运行�
 
 - [文档导航](docs/README.md)：设计、决策、测试与报告入口；
 - [Publisher 音视频设计](docs/design/publisher/overview.md)：发布端双轨模块、线程、时间轴、依赖与测试边界；
+- [Receiver 视频设计](docs/design/receiver/overview.md)：接收端 RTP/H.264、有限重排和随机访问恢复；
 - [项目路线图](docs/roadmap.md)：项目阶段、交付物和完成条件。
 
 ## 构建
@@ -81,7 +82,16 @@ cmake --build --preset linux-debug
 ctest --preset linux-debug
 ```
 
-查看 Publisher 参数并启动桌面发布；按 Ctrl+C 正常排空编码和 RTP 输出后退出：
+先启动 Receiver，把恢复后的 Annex-B H.264 写入文件：
+
+```sh
+./build/windows-debug/bin/semilive_receiver.exe \
+  --bind-address 0.0.0.0 \
+  --bind-port 5004 \
+  --output semilive-received.h264
+```
+
+再启动 Publisher；按 Ctrl+C 正常停止两个进程：
 
 ```sh
 ./build/windows-debug/bin/semilive_publisher.exe --help
@@ -90,11 +100,10 @@ ctest --preset linux-debug
   --rtp-port 5004
 ```
 
-Relay 和 Receiver 目前仍是占位程序：
+当前接收结果用于协议闭环验证，可使用 FFmpeg/ffprobe 检查。Relay 目前仍是占位程序：
 
 ```sh
 ./build/windows-debug/bin/semilive_relay.exe --help
-./build/windows-debug/bin/semilive_receiver.exe --help
 ```
 
 ## 许可证
