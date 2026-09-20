@@ -5,25 +5,30 @@
 
 ## 1. 工具与拓扑
 
-SemiLive 不自研弱网注入器，使用标准工具建立测试条件：
+SemiLive 当前使用项目内的单向 UDP Relay 建立可自动化、可复现的随机丢包条件：
 
-- Windows 本地开发和人工演示使用 Clumsy；
-- 正式对照实验使用 Linux `tc netem`；
+- Windows 本地开发和首轮对照实验使用 `semilive_relay`；
+- Clumsy 可用于人工交叉验证；
+- 具备 Linux 网关环境后使用 `tc netem` 做系统级交叉验证；
 - Wireshark 用于确认目标流量、RTP 序列变化和 RTCP 反馈；
 - 工具统计、抓包统计和 SemiLive 自身统计分别记录，不能互相替代。
 
-Clumsy 适合快速切换丢包、延迟、乱序和重复包，但其 localhost 流量可能被重复捕获，配置值也不
-应直接视为精确实测值。因此正式报告不能只使用 Clumsy。`tc netem` 必须位于被测流量真实经过的
-Linux 网络接口上；仅在 WSL2 中配置 qdisc，不代表 Windows 主机上的 UDP 流量会自动经过它。
+`semilive_relay` 是应用层故障注入器，不等同于操作系统网络队列。当前版本只实现按完整 UDP
+datagram 的固定 seed 随机丢包，不模拟内核排队、链路带宽或网卡行为。报告必须同时保存配置丢包
+率、Relay 实际丢弃统计和 Receiver 确认丢包，不能把任意一个数字替代另外两个。
 
-首选正式测试拓扑：
+当前测试拓扑：
 
 ```text
-Windows Publisher --> Linux netem 网关 --> Receiver
+Publisher :5004 --> semilive_relay --> :5006 Receiver
 ```
 
-测试 RTP 下行时在 Publisher 到 Receiver 的方向施加规则；增加 RTCP 后，上行反馈方向使用独立
-规则和统计，不能用一个“RTT”配置掩盖两个方向的差异。
+测试 RTP 下行时只在 Publisher 到 Receiver 的方向施加规则；增加 RTCP 后，上行反馈方向启动
+第二个 Relay 实例并使用独立端口、seed 和统计，不能用一个“RTT”配置掩盖两个方向的差异。
+
+Clumsy 适合快速切换更多故障类型，但 localhost 流量可能被重复捕获。`tc netem` 必须位于被测
+流量真实经过的 Linux 网络接口上；仅在 WSL2 中配置 qdisc，不代表 Windows 主机上的 UDP 流量
+会自动经过它。
 
 工具参考：
 

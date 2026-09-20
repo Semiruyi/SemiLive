@@ -15,7 +15,7 @@
 
 ## 测试
 
-- [弱网测试矩阵](testing/weak-network-matrix.md)：Clumsy/`tc netem` 测试拓扑、故障模型、
+- [弱网测试矩阵](testing/weak-network-matrix.md)：SemiLive Relay/外部工具测试拓扑、故障模型、
   对照组、指标定义、报告格式和通过条件。
 
 ## 设计
@@ -46,13 +46,17 @@
 - [Receiver 视频链路设计总览](design/receiver/overview.md)：UDP/RTP 接收、有限重排、
   Single NAL/FU-A 重组、AU 边界、随机访问恢复、播放器输出契约和测试边界。
 
+### Relay
+
+- [UDP 故障注入 Relay 设计](design/relay/overview.md)：单向 UDP 转发、确定性随机丢包、
+  生命周期、统计边界和扩展约束。
+
 ## 后续文档类型
 
 需要时再增加以下目录：
 
 - `adr/`：记录重要技术选择、备选方案和选择理由；
 - `reports/`：带日期的性能、稳定性和兼容性测试结果；
-- `design/relay/`：Relay 进入设计阶段后创建。
 
 设计细节只在所属组件文档维护。总览保留约束摘要并链接详细设计，避免同一算法存在两份
 相互独立的描述。

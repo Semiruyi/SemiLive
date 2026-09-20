@@ -12,10 +12,10 @@ SemiLive 是一个正在开发的 C++23 实时音视频项目，目标是完成�
 - `semilive_publisher`：采集 Windows 桌面并向指定 UDP endpoint 发送 H.264 RTP；
 - `semilive_receiver`：监听单路 H.264/RTP/UDP，完成 RTP 校验、有限重排、
   Single NAL/FU-A 解包、Access Unit 组装和随机访问恢复，并输出 Annex-B 文件；
-- `semilive_relay`：Linux 转发端仍是占位程序。
+- `semilive_relay`：单向 UDP 故障注入中转，支持固定 seed 的随机丢包和机器可读统计。
 
 当前 Receiver 输出仍是阶段验证用的 Annex-B 文件，尚未接入 SemiPlayer 实时播放；系统音频、
-Linux Relay、RTCP 反馈、重传和 WebRTC 也尚未实现。当前能力和后续阶段以
+生产形态的 Linux 媒体 Relay、RTCP 反馈、重传和 WebRTC 仍未实现。当前能力和后续阶段以
 [项目路线图](docs/roadmap.md)为准。
 
 ## 项目目标
@@ -110,11 +110,22 @@ Receiver 正常停止后会写出机器可读的会话配置、RTP 重排与确�
 Publisher 正常停止后会写出视频/GOP/码率和 RTP 配置，以及采集帧、编码 AU、关键帧、原始媒体
 RTP datagram 与字节数，作为 Receiver 丢包率和后续反馈/重传开销的发送端分母。
 
-当前接收结果用于协议闭环验证，可使用 FFmpeg/ffprobe 检查。Relay 目前仍是占位程序：
+当前接收结果用于协议闭环验证，可使用 FFmpeg/ffprobe 检查。需要注入 1% 随机丢包时，将
+Receiver 改为监听 `5006`，Publisher 仍向 `5004` 发送，并在两者之间启动 Relay：
 
 ```sh
-./build/windows-debug/bin/semilive_relay.exe --help
+./build/windows-debug/bin/semilive_relay.exe \
+  --bind-address 127.0.0.1 \
+  --bind-port 5004 \
+  --forward-address 127.0.0.1 \
+  --forward-port 5006 \
+  --loss-percent 1 \
+  --seed 20260919 \
+  --stats-json relay-stats.json
 ```
+
+Relay 按完整 UDP datagram 做确定性随机判定，不解析或修改 RTP。配置丢包率和实际接收、转发、
+丢弃包数分别写入报告，便于与 Publisher、Receiver 统计交叉核对。
 
 ## 许可证
 
