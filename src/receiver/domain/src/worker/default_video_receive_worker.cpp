@@ -569,7 +569,6 @@ void DefaultVideoReceiveWorker::Impl::finish_session_timing() noexcept {
                 std::max(Clock::duration::zero(),
                          finished_at - *last_output_at_));
         stats_.terminal_output_gap = terminal_gap;
-        record_output_gap(terminal_gap);
     }
     session_started_at_.reset();
 }

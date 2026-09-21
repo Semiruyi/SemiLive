@@ -38,6 +38,7 @@ struct CommandLineOptions {
     CommandLineAction action = CommandLineAction::Run;
     application::RelayConfig relay;
     std::optional<std::filesystem::path> stats_json_path;
+    std::optional<std::chrono::seconds> run_duration;
 };
 
 using CommandLineResult =
@@ -73,6 +74,8 @@ void print_help() {
            "                                  (default: 10)\n"
            "  --stats-json PATH               Write final session statistics\n"
            "                                  as JSON (existing file replaced)\n"
+           "  --run-duration-seconds SECONDS  Stop normally after 1..86400 "
+           "seconds\n"
            "  --help                          Show this help\n"
            "  --version                       Show the version\n";
 }
@@ -152,6 +155,7 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
     bool receive_buffer_set = false;
     bool poll_interval_set = false;
     bool stats_json_set = false;
+    bool run_duration_set = false;
 
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{argv[index]};
@@ -304,6 +308,23 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
             options.stats_json_path = std::filesystem::path{*value};
             continue;
         }
+        if (argument == "--run-duration-seconds") {
+            if (auto duplicate = reject_duplicate(run_duration_set);
+                !duplicate) {
+                return std::unexpected{duplicate.error()};
+            }
+            auto value = read_value();
+            if (!value) {
+                return std::unexpected{value.error()};
+            }
+            auto parsed = parse_integer<std::uint32_t>(
+                *value, "--run-duration-seconds", 1, 86'400);
+            if (!parsed) {
+                return std::unexpected{parsed.error()};
+            }
+            options.run_duration = std::chrono::seconds{*parsed};
+            continue;
+        }
         return std::unexpected{"unknown argument: " +
                                std::string{argument}};
     }
@@ -323,7 +344,8 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
 }
 
 int run_relay(application::RelayConfig config,
-              const std::optional<std::filesystem::path>& stats_json_path) {
+              const std::optional<std::filesystem::path>& stats_json_path,
+              const std::optional<std::chrono::seconds> run_duration) {
     const auto report_config = config;
     application::RelaySession session{std::move(config)};
     auto opened = session.open();
@@ -350,8 +372,15 @@ int run_relay(application::RelayConfig config,
         report_config.random_seed);
 
     const auto started_at = std::chrono::steady_clock::now();
+    const auto stop_at = run_duration
+                             ? std::optional{started_at + *run_duration}
+                             : std::nullopt;
     bool succeeded = true;
     while (stop_requested == 0) {
+        if (stop_at && std::chrono::steady_clock::now() >= *stop_at) {
+            SEMILIVE_LOG_INFO("relay run duration elapsed");
+            break;
+        }
         const auto result = session.poll_once();
         if (!result) {
             std::cerr << "Relay failed: " << result.error() << '\n';
@@ -422,7 +451,8 @@ int main(int argc, char* argv[]) {
     }
 
     try {
-        return run_relay(options->relay, options->stats_json_path);
+        return run_relay(options->relay, options->stats_json_path,
+                         options->run_duration);
     } catch (const std::exception& error) {
         std::cerr << "Relay terminated with an exception: "
                   << error.what() << '\n';

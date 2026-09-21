@@ -44,6 +44,7 @@ struct CommandLineOptions {
     CommandLineAction action = CommandLineAction::Run;
     composition::PublisherConfig publisher;
     std::optional<std::filesystem::path> stats_json_path;
+    std::optional<std::chrono::seconds> run_duration;
 };
 
 using CommandLineResult = std::expected<CommandLineOptions, std::string>;
@@ -79,6 +80,8 @@ void print_help() {
            "  --stats-json PATH                 Write final session statistics "
            "as JSON\n"
            "                                    (existing file is replaced)\n"
+           "  --run-duration-seconds SECONDS    Stop normally after 1..86400 "
+           "seconds\n"
            "  --help                            Show this help\n"
            "  --version                         Show the version\n";
 }
@@ -92,6 +95,7 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
     bool display_set = false;
     bool pointer_disabled = false;
     bool stats_json_set = false;
+    bool run_duration_set = false;
 
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{argv[index]};
@@ -248,6 +252,31 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
             }
             options.stats_json_path = std::filesystem::path{argv[index]};
             stats_json_set = true;
+            continue;
+        }
+
+        if (argument == "--run-duration-seconds") {
+            if (run_duration_set) {
+                return std::unexpected{
+                    "--run-duration-seconds may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{
+                    "--run-duration-seconds requires a value"};
+            }
+            const std::string_view text{argv[index]};
+            std::uint32_t seconds = 0;
+            const auto parsed = std::from_chars(
+                text.data(), text.data() + text.size(), seconds);
+            if (parsed.ec != std::errc{} ||
+                parsed.ptr != text.data() + text.size() || seconds == 0 ||
+                seconds > 86'400) {
+                return std::unexpected{
+                    "--run-duration-seconds requires an integer in "
+                    "1..86400"};
+            }
+            options.run_duration = std::chrono::seconds{seconds};
+            run_duration_set = true;
             continue;
         }
 
@@ -416,7 +445,8 @@ bool dispose_composition(composition::PublisherComposition& graph) {
 
 int run_publisher(
     composition::PublisherConfig config,
-    const std::optional<std::filesystem::path>& stats_json_path) {
+    const std::optional<std::filesystem::path>& stats_json_path,
+    const std::optional<std::chrono::seconds> run_duration) {
     const auto report_config = config;
     composition::PublisherComposition graph{std::move(config)};
     const auto assembled = graph.assemble();
@@ -442,8 +472,16 @@ int run_publisher(
 
     print_started(*started);
     const auto session_started_at = std::chrono::steady_clock::now();
+    const auto stop_at = run_duration
+                             ? std::optional{session_started_at + *run_duration}
+                             : std::nullopt;
     bool succeeded = true;
+    bool duration_elapsed = false;
     while (stop_requested == 0) {
+        if (stop_at && std::chrono::steady_clock::now() >= *stop_at) {
+            duration_elapsed = true;
+            break;
+        }
         const auto terminal = controller->wait_for_terminal_for(250ms);
         if (terminal.status == app::PublisherWaitStatus::Timeout) {
             continue;
@@ -470,6 +508,9 @@ int run_publisher(
     if (stop_requested != 0) {
         std::cout << "Stopping publisher...\n";
         SEMILIVE_LOG_INFO("publisher stop requested by signal");
+    } else if (duration_elapsed) {
+        std::cout << "Publisher run duration elapsed; stopping...\n";
+        SEMILIVE_LOG_INFO("publisher run duration elapsed");
     }
 
     const auto stopped = controller->stop_publishing();
@@ -536,7 +577,8 @@ int main(int argc, char* argv[]) {
 
     try {
         const auto result =
-            run_publisher(options->publisher, options->stats_json_path);
+            run_publisher(options->publisher, options->stats_json_path,
+                          options->run_duration);
         SEMILIVE_LOG_INFO("publisher process stopped with exit code {}",
                           result);
         return result;

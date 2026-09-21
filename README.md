@@ -147,6 +147,11 @@ Receiver 改为监听 `5006`，Publisher 仍向 `5004` 发送，并在两者之�
 Relay 按完整 UDP datagram 做确定性随机判定，不解析或修改 RTP。配置丢包率和实际接收、转发、
 丢弃包数分别写入报告，便于与 Publisher、Receiver 统计交叉核对。
 
+三个进程都支持 `--run-duration-seconds 1..86400`，到期后走正常停止流程并写出最终报告。Windows
+随机丢包基线可用 `tools/weak-network/run-random-loss-baseline.ps1` 自动运行多组丢包率和 seed，
+校验报告并生成 `runs.csv` 与 `summary.csv`；具体用法见
+[`tools/weak-network/README.md`](tools/weak-network/README.md)。
+
 ## 许可证
 
 项目源码采用 [MIT License](LICENSE)。FFmpeg、libx264 等外部依赖分别遵循其自身许可证，

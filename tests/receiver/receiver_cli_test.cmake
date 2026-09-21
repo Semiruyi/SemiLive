@@ -217,6 +217,21 @@ if(stall_threshold_result EQUAL 0 OR
 endif()
 
 execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}" --run-duration-seconds invalid
+    RESULT_VARIABLE duration_result
+    OUTPUT_VARIABLE duration_stdout
+    ERROR_VARIABLE duration_stderr
+)
+if(duration_result EQUAL 0 OR
+   NOT duration_stderr MATCHES
+       "--run-duration-seconds requires an integer in 1..86400")
+    message(FATAL_ERROR
+        "receiver accepted invalid run duration: result=${duration_result}, "
+        "stdout=${duration_stdout}, stderr=${duration_stderr}"
+    )
+endif()
+
+execute_process(
     COMMAND "${SEMILIVE_RECEIVER}"
             --stats-json first.json --stats-json second.json
     RESULT_VARIABLE duplicate_stats_result

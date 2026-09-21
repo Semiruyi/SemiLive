@@ -162,6 +162,21 @@ if(display_result EQUAL 0 OR
 endif()
 
 execute_process(
+    COMMAND "${SEMILIVE_PUBLISHER}" --run-duration-seconds 0
+    RESULT_VARIABLE duration_result
+    OUTPUT_VARIABLE duration_stdout
+    ERROR_VARIABLE duration_stderr
+)
+if(duration_result EQUAL 0 OR
+   NOT duration_stderr MATCHES
+       "--run-duration-seconds requires an integer in 1..86400")
+    message(FATAL_ERROR
+        "publisher accepted invalid run duration: result=${duration_result}, "
+        "stdout=${duration_stdout}, stderr=${duration_stderr}"
+    )
+endif()
+
+execute_process(
     COMMAND "${SEMILIVE_PUBLISHER}" --help --no-pointer
     RESULT_VARIABLE help_result
     OUTPUT_VARIABLE help_stdout

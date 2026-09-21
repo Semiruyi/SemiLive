@@ -46,6 +46,7 @@ struct CommandLineOptions {
     CommandLineAction action = CommandLineAction::Run;
     composition::ReceiverConfig receiver;
     std::optional<std::filesystem::path> stats_json_path;
+    std::optional<std::chrono::seconds> run_duration;
 };
 
 using CommandLineResult = std::expected<CommandLineOptions, std::string>;
@@ -100,6 +101,8 @@ void print_help() {
            "  --stats-json PATH               Write final session statistics "
            "as JSON\n"
            "                                  (existing file is replaced)\n"
+           "  --run-duration-seconds SECONDS  Stop normally after 1..86400 "
+           "seconds\n"
            "  --help                          Show this help\n"
            "  --version                       Show the version\n";
 }
@@ -147,6 +150,7 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
     bool poll_interval_set = false;
     bool output_stall_threshold_set = false;
     bool stats_json_set = false;
+    bool run_duration_set = false;
 
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{argv[index]};
@@ -407,6 +411,26 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
             continue;
         }
 
+        if (argument == "--run-duration-seconds") {
+            if (run_duration_set) {
+                return std::unexpected{
+                    "--run-duration-seconds may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{
+                    "--run-duration-seconds requires a value"};
+            }
+            const auto value = parse_unsigned(argv[index]);
+            if (!value || *value == 0 || *value > 86'400) {
+                return std::unexpected{
+                    "--run-duration-seconds requires an integer in "
+                    "1..86400"};
+            }
+            options.run_duration = std::chrono::seconds{*value};
+            run_duration_set = true;
+            continue;
+        }
+
         if (argument == "--output-stall-threshold-ms") {
             if (output_stall_threshold_set) {
                 return std::unexpected{
@@ -609,7 +633,8 @@ void print_final_stats(const app::ReceiverControllerStats& stats) {
 }
 
 int run_receiver(composition::ReceiverConfig config,
-                 const std::optional<std::filesystem::path>& stats_json_path) {
+                 const std::optional<std::filesystem::path>& stats_json_path,
+                 const std::optional<std::chrono::seconds> run_duration) {
     const auto report_config = config;
     composition::ReceiverComposition graph{std::move(config)};
     const auto assembled = graph.assemble();
@@ -634,8 +659,17 @@ int run_receiver(composition::ReceiverConfig config,
     }
 
     print_started(*started, controller->stats());
+    const auto stop_at = run_duration
+                             ? std::optional{std::chrono::steady_clock::now() +
+                                             *run_duration}
+                             : std::nullopt;
     bool succeeded = true;
+    bool duration_elapsed = false;
     while (stop_requested == 0) {
+        if (stop_at && std::chrono::steady_clock::now() >= *stop_at) {
+            duration_elapsed = true;
+            break;
+        }
         const auto terminal = controller->wait_for_terminal_for(250ms);
         if (terminal.status == app::ReceiverWaitStatus::Timeout) {
             continue;
@@ -661,6 +695,9 @@ int run_receiver(composition::ReceiverConfig config,
     if (stop_requested != 0) {
         std::cout << "Stopping receiver...\n";
         SEMILIVE_LOG_INFO("receiver stop requested by signal");
+    } else if (duration_elapsed) {
+        std::cout << "Receiver run duration elapsed; stopping...\n";
+        SEMILIVE_LOG_INFO("receiver run duration elapsed");
     }
 
     const auto stopped = controller->stop_receiving();
@@ -727,7 +764,8 @@ int main(int argc, char* argv[]) {
 
     try {
         const auto result =
-            run_receiver(options->receiver, options->stats_json_path);
+            run_receiver(options->receiver, options->stats_json_path,
+                         options->run_duration);
         SEMILIVE_LOG_INFO("receiver process stopped with exit code {}",
                           result);
         return result;

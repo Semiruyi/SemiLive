@@ -387,7 +387,7 @@ void backpressure_discards_until_the_next_random_access_point() {
             "recovered worker must stop normally");
 }
 
-void session_end_accounts_for_an_unrecovered_output_stall() {
+void session_end_reports_the_censored_terminal_gap_separately() {
     WorkerFixture fixture{1ms};
     require(fixture.worker->start().has_value(),
             "terminal stall test session must start");
@@ -404,12 +404,11 @@ void session_end_accounts_for_an_unrecovered_output_stall() {
     const auto stats = fixture.worker->stats();
     require(stats.terminal_output_gap.has_value() &&
                 *stats.terminal_output_gap > 1ms &&
-                stats.maximum_output_gap.has_value() &&
-                *stats.maximum_output_gap >= *stats.terminal_output_gap &&
-                stats.output_stall_events == 1 &&
-                stats.output_stall_excess_total >
+                !stats.maximum_output_gap.has_value() &&
+                stats.output_stall_events == 0 &&
+                stats.output_stall_excess_total ==
                     std::chrono::nanoseconds::zero(),
-            "session end must account for the final output stall");
+            "session end must not turn a censored terminal gap into a stall");
 }
 
 void input_open_failure_rolls_back_output_and_allows_retry() {
@@ -520,7 +519,7 @@ int main() {
     try {
         drives_the_complete_pipeline_on_one_worker_thread();
         backpressure_discards_until_the_next_random_access_point();
-        session_end_accounts_for_an_unrecovered_output_stall();
+        session_end_reports_the_censored_terminal_gap_separately();
         input_open_failure_rolls_back_output_and_allows_retry();
         output_open_failure_never_starts_the_input();
         runtime_input_failure_aborts_and_requires_stop_acknowledgement();
