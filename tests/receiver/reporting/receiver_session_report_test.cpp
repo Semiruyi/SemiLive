@@ -84,7 +84,8 @@ void renders_machine_readable_baseline_fields() {
         reporting::render_receiver_session_report_json(sample_report());
     require(json.starts_with("{\n") && json.ends_with("}\n"),
             "report must be a complete JSON object");
-    require(json.find("\"schema_version\": 1") != std::string::npos &&
+    require(json.find("\"schema_version\": 2") != std::string::npos &&
+                json.find("\"mode\": \"file\"") != std::string::npos &&
                 json.find("\"run_succeeded\": true") !=
                     std::string::npos &&
                 json.find("\"duration_ms\": 1234") !=

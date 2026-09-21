@@ -123,6 +123,70 @@ if(output_result EQUAL 0 OR
 endif()
 
 execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}" --output-mode invalid
+    RESULT_VARIABLE output_mode_result
+    OUTPUT_VARIABLE output_mode_stdout
+    ERROR_VARIABLE output_mode_stderr
+)
+if(output_mode_result EQUAL 0 OR
+   NOT output_mode_stderr MATCHES
+       "--output-mode requires file or ffplay")
+    message(FATAL_ERROR
+        "receiver accepted invalid output mode: result=${output_mode_result}, "
+        "stdout=${output_mode_stdout}, stderr=${output_mode_stderr}"
+    )
+endif()
+
+execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}" --ffplay-buffer-aus 0
+    RESULT_VARIABLE ffplay_buffer_result
+    OUTPUT_VARIABLE ffplay_buffer_stdout
+    ERROR_VARIABLE ffplay_buffer_stderr
+)
+if(ffplay_buffer_result EQUAL 0 OR
+   NOT ffplay_buffer_stderr MATCHES
+       "--ffplay-buffer-aus requires a positive integer")
+    message(FATAL_ERROR
+        "receiver accepted invalid ffplay buffer: "
+        "result=${ffplay_buffer_result}, stdout=${ffplay_buffer_stdout}, "
+        "stderr=${ffplay_buffer_stderr}"
+    )
+endif()
+
+execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}" --ffplay-path ffplay
+    RESULT_VARIABLE ffplay_mode_result
+    OUTPUT_VARIABLE ffplay_mode_stdout
+    ERROR_VARIABLE ffplay_mode_stderr
+)
+if(ffplay_mode_result EQUAL 0 OR
+   NOT ffplay_mode_stderr MATCHES
+       "--ffplay options require --output-mode ffplay")
+    message(FATAL_ERROR
+        "receiver accepted ffplay option in file mode: "
+        "result=${ffplay_mode_result}, stdout=${ffplay_mode_stdout}, "
+        "stderr=${ffplay_mode_stderr}"
+    )
+endif()
+
+execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}"
+            --output-mode ffplay --output video.h264
+    RESULT_VARIABLE ffplay_output_result
+    OUTPUT_VARIABLE ffplay_output_stdout
+    ERROR_VARIABLE ffplay_output_stderr
+)
+if(ffplay_output_result EQUAL 0 OR
+   NOT ffplay_output_stderr MATCHES
+       "--output may only be used with --output-mode file")
+    message(FATAL_ERROR
+        "receiver accepted file output in ffplay mode: "
+        "result=${ffplay_output_result}, stdout=${ffplay_output_stdout}, "
+        "stderr=${ffplay_output_stderr}"
+    )
+endif()
+
+execute_process(
     COMMAND "${SEMILIVE_RECEIVER}" --stats-json
     RESULT_VARIABLE stats_path_result
     OUTPUT_VARIABLE stats_path_stdout

@@ -7,14 +7,16 @@ SemiLive 是一个正在开发的 C++23 实时音视频项目，目标是完成�
 
 ## 当前状态
 
-项目已经接通从 Windows 桌面采集到 H.264/RTP/UDP 文件接收的首条视频链路：
+项目已经接通从 Windows 桌面采集到 H.264/RTP/UDP 接收与 ffplay 实时预览的视频链路：
 
 - `semilive_publisher`：采集 Windows 桌面并向指定 UDP endpoint 发送 H.264 RTP；
 - `semilive_receiver`：监听单路 H.264/RTP/UDP，完成 RTP 校验、有限重排、
-  Single NAL/FU-A 解包、Access Unit 组装和随机访问恢复，并输出 Annex-B 文件；
+  Single NAL/FU-A 解包、Access Unit 组装和随机访问恢复，可输出 Annex-B 文件或通过有界异步
+  管道交给 ffplay 实时预览；
 - `semilive_relay`：单向 UDP 故障注入中转，支持固定 seed 的随机丢包和机器可读统计。
 
-当前 Receiver 输出仍是阶段验证用的 Annex-B 文件，尚未接入 SemiPlayer 实时播放；系统音频、
+当前 ffplay 输出是阶段验证用的外部预览，不传递 Receiver 媒体时间，也不替代 SemiPlayer 的最终
+实时输入接口；系统音频、
 生产形态的 Linux 媒体 Relay、RTCP 反馈、重传和 WebRTC 仍未实现。当前能力和后续阶段以
 [项目路线图](docs/roadmap.md)为准。
 
@@ -75,7 +77,7 @@ libavutil 和 libswscale：
 ```sh
 sudo apt-get update
 sudo apt-get install --yes \
-  g++ cmake ninja-build pkg-config \
+  g++ cmake ninja-build pkg-config ffmpeg \
   libspdlog-dev libavcodec-dev libavutil-dev libswscale-dev
 cmake --preset linux-debug
 cmake --build --preset linux-debug
@@ -96,6 +98,24 @@ ctest --preset linux-debug
 Receiver 正常停止后会写出机器可读的会话配置、RTP 重排与确认丢包、H.264 解包与 AU 丢弃、
 随机访问恢复次数/耗时，以及首个输出、输出停顿和会话结束时尾部间隔等基线指标。启动阶段等待
 第一个 IDR 不计入弱网恢复 episode；未完成的恢复等待会单独记录，不冒充已完成恢复。
+
+需要实时预览时，将文件输出替换为 ffplay 输出。Receiver 只把经过重排、解包、组帧和随机访问
+恢复的完整 AU 交给 ffplay；播放器变慢时有界队列会整 AU 丢弃并重新等待随机访问点，不阻塞 UDP
+接收线程：
+
+```sh
+./build/windows-debug/bin/semilive_receiver.exe \
+  --bind-address 0.0.0.0 \
+  --bind-port 5004 \
+  --output-mode ffplay \
+  --ffplay-path ffplay \
+  --ffplay-buffer-aus 32 \
+  --ffplay-buffer-bytes 4194304 \
+  --stats-json receiver-stats.json
+```
+
+ffplay 消费裸 Annex-B H.264，适合观察丢包后的画面停顿和恢复，但不保留 AU 媒体时间。因此当前
+报告中的 output gap 仍是 Receiver 成功提交 AU 的链路指标，不能当作精确的画面冻结或端到端延迟。
 
 再启动 Publisher；按 Ctrl+C 正常停止两个进程：
 

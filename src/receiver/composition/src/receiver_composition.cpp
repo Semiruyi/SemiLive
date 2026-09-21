@@ -3,6 +3,7 @@
 #include <semilive/receiver/application/default_receiver_controller.hpp>
 #include <semilive/receiver/domain/worker/default_video_receive_worker.hpp>
 #include <semilive/receiver/infrastructure/network/udp_datagram_source_backend.hpp>
+#include <semilive/receiver/infrastructure/output/ffplay/ffplay_video_output_backend.hpp>
 #include <semilive/receiver/infrastructure/output/file/h264_file_output_backend.hpp>
 
 #include <exception>
@@ -75,9 +76,20 @@ ReceiverCompositionResult ReceiverComposition::Impl::assemble() {
             std::make_unique<infra::network::UdpDatagramSourceBackend>();
         auto pipeline = std::make_unique<domain::H264RtpReceivePipeline>(
             config_.pipeline);
-        auto output =
-            std::make_unique<infra::output::H264FileOutputBackend>(
+        std::unique_ptr<contracts::output::LiveVideoOutputBackend> output;
+        if (config_.output_mode == ReceiverVideoOutputMode::Ffplay) {
+            infra::output::FfplayVideoOutputConfig ffplay_config;
+            ffplay_config.executable_path = config_.ffplay.executable_path;
+            ffplay_config.maximum_buffered_access_units =
+                config_.ffplay.maximum_buffered_access_units;
+            ffplay_config.maximum_buffered_bytes =
+                config_.ffplay.maximum_buffered_bytes;
+            output = std::make_unique<infra::output::FfplayVideoOutputBackend>(
+                std::move(ffplay_config));
+        } else {
+            output = std::make_unique<infra::output::H264FileOutputBackend>(
                 config_.h264_output_path);
+        }
         domain::DefaultVideoReceiveWorkerConfig worker_config{
             config_.input, config_.receive_poll_interval,
             config_.output_stall_threshold};

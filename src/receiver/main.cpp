@@ -81,9 +81,17 @@ void print_help() {
            "  --udp-receive-buffer-bytes SIZE Requested kernel UDP receive "
            "buffer\n"
            "                                  (default: 4194304)\n"
+           "  --output-mode MODE              file or ffplay "
+           "(default: file)\n"
            "  --output PATH                   Annex-B H.264 output file\n"
            "                                  (default: semilive-received.h264;\n"
            "                                   existing file is replaced)\n"
+           "  --ffplay-path PATH              ffplay executable "
+           "(default: ffplay)\n"
+           "  --ffplay-buffer-aus COUNT       Maximum queued/in-flight AUs\n"
+           "                                  (default: 32)\n"
+           "  --ffplay-buffer-bytes SIZE      Maximum queued/in-flight bytes\n"
+           "                                  (default: 4194304)\n"
            "  --poll-interval-ms MS           Receive/timer poll interval\n"
            "                                  (default: 10, range: 1..1000)\n"
            "  --output-stall-threshold-ms MS  Output gap threshold for stall "
@@ -131,7 +139,11 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
     bool ssrc_set = false;
     bool maximum_datagram_set = false;
     bool receive_buffer_set = false;
+    bool output_mode_set = false;
     bool output_set = false;
+    bool ffplay_path_set = false;
+    bool ffplay_buffer_access_units_set = false;
+    bool ffplay_buffer_bytes_set = false;
     bool poll_interval_set = false;
     bool output_stall_threshold_set = false;
     bool stats_json_set = false;
@@ -283,6 +295,84 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
             continue;
         }
 
+        if (argument == "--output-mode") {
+            if (output_mode_set) {
+                return std::unexpected{
+                    "--output-mode may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{"--output-mode requires file or ffplay"};
+            }
+            const std::string_view value{argv[index]};
+            if (value == "file") {
+                options.receiver.output_mode =
+                    composition::ReceiverVideoOutputMode::File;
+            } else if (value == "ffplay") {
+                options.receiver.output_mode =
+                    composition::ReceiverVideoOutputMode::Ffplay;
+            } else {
+                return std::unexpected{"--output-mode requires file or ffplay"};
+            }
+            output_mode_set = true;
+            continue;
+        }
+
+        if (argument == "--ffplay-path") {
+            if (ffplay_path_set) {
+                return std::unexpected{
+                    "--ffplay-path may only be specified once"};
+            }
+            if (++index >= argc || std::string_view{argv[index]}.empty()) {
+                return std::unexpected{"--ffplay-path requires a path"};
+            }
+            options.receiver.ffplay.executable_path =
+                std::filesystem::path{argv[index]};
+            ffplay_path_set = true;
+            continue;
+        }
+
+        if (argument == "--ffplay-buffer-aus") {
+            if (ffplay_buffer_access_units_set) {
+                return std::unexpected{
+                    "--ffplay-buffer-aus may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{
+                    "--ffplay-buffer-aus requires a value"};
+            }
+            const auto value = parse_unsigned(argv[index]);
+            if (!value || *value == 0 ||
+                *value > std::numeric_limits<std::size_t>::max()) {
+                return std::unexpected{
+                    "--ffplay-buffer-aus requires a positive integer"};
+            }
+            options.receiver.ffplay.maximum_buffered_access_units =
+                static_cast<std::size_t>(*value);
+            ffplay_buffer_access_units_set = true;
+            continue;
+        }
+
+        if (argument == "--ffplay-buffer-bytes") {
+            if (ffplay_buffer_bytes_set) {
+                return std::unexpected{
+                    "--ffplay-buffer-bytes may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{
+                    "--ffplay-buffer-bytes requires a value"};
+            }
+            const auto value = parse_unsigned(argv[index]);
+            if (!value || *value == 0 ||
+                *value > std::numeric_limits<std::size_t>::max()) {
+                return std::unexpected{
+                    "--ffplay-buffer-bytes requires a positive integer"};
+            }
+            options.receiver.ffplay.maximum_buffered_bytes =
+                static_cast<std::size_t>(*value);
+            ffplay_buffer_bytes_set = true;
+            continue;
+        }
+
         if (argument == "--poll-interval-ms") {
             if (poll_interval_set) {
                 return std::unexpected{
@@ -343,7 +433,22 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
                                std::string{argument}};
     }
 
-    if (options.stats_json_path &&
+    if (options.receiver.output_mode ==
+            composition::ReceiverVideoOutputMode::Ffplay &&
+        output_set) {
+        return std::unexpected{
+            "--output may only be used with --output-mode file"};
+    }
+    if (options.receiver.output_mode ==
+            composition::ReceiverVideoOutputMode::File &&
+        (ffplay_path_set || ffplay_buffer_access_units_set ||
+         ffplay_buffer_bytes_set)) {
+        return std::unexpected{
+            "--ffplay options require --output-mode ffplay"};
+    }
+    if (options.receiver.output_mode ==
+            composition::ReceiverVideoOutputMode::File &&
+        options.stats_json_path &&
         same_normalized_path(*options.stats_json_path,
                              options.receiver.h264_output_path)) {
         return std::unexpected{

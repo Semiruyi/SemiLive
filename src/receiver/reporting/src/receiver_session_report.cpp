@@ -112,6 +112,12 @@ void write_optional_integer(std::ostream& output,
                : "waiting_for_random_access";
 }
 
+[[nodiscard]] std::string_view output_mode_name(
+    const composition::ReceiverVideoOutputMode mode) noexcept {
+    return mode == composition::ReceiverVideoOutputMode::Ffplay ? "ffplay"
+                                                                : "file";
+}
+
 void write_config(std::ostream& output,
                   const composition::ReceiverConfig& config) {
     output << "  \"config\": {\n"
@@ -148,9 +154,21 @@ void write_config(std::ostream& output,
               "      \"maximum_nal_units_per_access_unit\": "
            << config.pipeline.assembler.maximum_nal_units << "\n"
               "    },\n"
-              "    \"output_path\": ";
+              "    \"output\": {\n"
+              "      \"mode\": ";
+    write_json_string(output, output_mode_name(config.output_mode));
+    output << ",\n"
+              "      \"file_path\": ";
     write_json_string(output, path_text(config.h264_output_path));
     output << ",\n"
+              "      \"ffplay_executable_path\": ";
+    write_json_string(output, path_text(config.ffplay.executable_path));
+    output << ",\n"
+              "      \"ffplay_maximum_buffered_access_units\": "
+           << config.ffplay.maximum_buffered_access_units << ",\n"
+              "      \"ffplay_maximum_buffered_bytes\": "
+           << config.ffplay.maximum_buffered_bytes << "\n"
+              "    },\n"
               "    \"receive_poll_interval_ms\": "
            << config.receive_poll_interval.count() << ",\n"
               "    \"output_stall_threshold_ms\": "
@@ -404,7 +422,7 @@ std::string render_receiver_session_report_json(
     std::ostringstream output;
     output.imbue(std::locale::classic());
     output << "{\n"
-              "  \"schema_version\": 1,\n"
+              "  \"schema_version\": 2,\n"
               "  \"application\": \"semilive_receiver\",\n"
               "  \"application_version\": \"0.1.0-dev\",\n";
     write_config(output, report.config);

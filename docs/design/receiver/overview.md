@@ -44,6 +44,7 @@ Main
          -> RTP timestamp mapping
       -> LiveVideoOutputBackend
          -> Annex-B file output（阶段验证）
+         -> ffplay process output（实时预览）
          -> SemiPlayer adapter（最终输出）
 -> ReceiverSessionReport（可选最终 JSON）
 ```
@@ -56,7 +57,7 @@ Main
 | Contracts | 定义数据报输入与完整视频 AU 输出的后端边界 |
 | Domain | 实现 RTP/H.264 处理、恢复状态机、无 I/O 的接收 Pipeline 和 Receive Worker |
 | Application | 通过 ReceiverController 管理接收会话，不处理媒体数据 |
-| Infrastructure | 实现 UDP Socket、文件验证输出和 SemiPlayer 适配器 |
+| Infrastructure | 实现 UDP Socket、文件验证输出、ffplay 预览和 SemiPlayer 适配器 |
 | Composition | 校验配置、选择具体后端、构造对象图并保证逆序释放 |
 | Reporting | 在会话结束后把配置与最终统计序列化为机器可读 JSON |
 
@@ -93,13 +94,16 @@ Infrastructure 边界。
 `LiveVideoOutputBackend` 表示一个实时视频会话的输出边界，负责打开输出、非阻塞接收完整 AU，
 以及正常或异常关闭。
 
-首版保留两个实现方向：
+输出边界保留三个实现方向：
 
 - Annex-B 文件输出用于先验证 Publisher -> Receiver 的字节和时间边界；
+- ffplay 输出通过独立写线程和有界队列把完整 Annex-B AU 交给外部播放器，用于实时预览和弱网
+  行为观察；队列饱和时整 AU 返回背压丢弃，不阻塞 Receiver 收包线程；
 - SemiPlayer Adapter 用于最终实时播放，内部调用后续增加的 SemiPlayer 实时 AU 输入 API。
 
 Receiver Domain 只依赖输出契约，不包含 SemiPlayer 头文件。SemiPlayer Adapter 只接收完整 H.264
-AU 和媒体时间，不把 RTP 概念带入播放器。
+AU 和媒体时间，不把 RTP 概念带入播放器。ffplay 裸 H.264 管道不传递 AU 媒体时间，因此只作为
+阶段预览，不承担精确播放调度、画面冻结或端到端延迟测量。
 
 ### 3.4 VideoReceiveWorker
 
@@ -128,8 +132,8 @@ Controller 只提供接收会话的启动、停止、状态、等待和统计接
 包含 active wait 的总值和最大值。
 
 `maximum_output_gap` 覆盖相邻成功提交 AU 的间隔，以及最后一次成功提交到会话结束的尾部间隔。
-`output_stall` 使用报告中固定的阈值统计事件数和超出阈值的累计时长。这些字段只作为当前文件
-输出阶段的链路停顿代理，不表述为播放器画面冻结。
+`output_stall` 使用报告中固定的阈值统计事件数和超出阈值的累计时长。这些字段只作为当前文件或
+ffplay 输出阶段的链路停顿代理，不表述为播放器画面冻结。
 
 ## 4. 线程模型
 
@@ -224,6 +228,7 @@ SemiLive::ReceiverDomain
 SemiLive::ReceiverApplication
 SemiLive::ReceiverInfraNetwork
 SemiLive::ReceiverInfraFileOutput
+SemiLive::ReceiverInfraFfplayOutput
 SemiLive::ReceiverInfraSemiPlayer
 SemiLive::ReceiverInfrastructure
 SemiLive::ReceiverComposition
@@ -257,6 +262,7 @@ Infrastructure 只实现 Contracts：
 ```text
 ReceiverInfraNetwork ---------> ReceiverContracts + ReceiverModel
 ReceiverInfraFileOutput ------> ReceiverContracts + ReceiverModel
+ReceiverInfraFfplayOutput ----> ReceiverContracts + ReceiverModel
 ReceiverInfraSemiPlayer ------> ReceiverContracts + ReceiverModel
                                  + SemiPlayer public SDK
 
@@ -274,8 +280,8 @@ ReceiverReporting ------------> Composition + Application statistics
 - 测试只链接被测 target，利用编译和链接边界阻止跨层依赖；
 - SemiPlayer 通过公开、版本化的 SDK target 接入，不直接包含兄弟仓库的内部源码。
 
-SemiPlayer 实时输入尚未完成时，Receiver 可以只构建文件输出链路。实时播放阶段再加入可选的
-SemiPlayer SDK 构建依赖，最终发布和 CI 使用固定版本完成可复现构建。
+SemiPlayer 实时输入尚未完成时，Receiver 可以构建文件输出与 ffplay 外部预览链路。正式实时播放
+阶段再加入可选的 SemiPlayer SDK 构建依赖，最终发布和 CI 使用固定版本完成可复现构建。
 
 ## 8. Composition 与所有权
 
@@ -360,11 +366,12 @@ Receiver 按以下阶段推进：
 
 1. 纯内存验证 RTP 解析、有限重排、FU-A 重组、AU 边界和 IDR 恢复；
 2. 接入 UDP loopback 和 Annex-B 文件输出，验证 Publisher -> Receiver 码流等价性；
-3. 改造 SemiPlayer 实时 AU 输入并实现输出 Adapter；
-4. 完成 Publisher -> Receiver -> SemiPlayer 直连播放；
-5. 注入丢包、乱序和损坏 FU-A，验证只从完整 IDR 恢复；
-6. 完成 1080p30、30 分钟稳定性和端到端指标报告；
-7. 视频直连闭环稳定后，再设计 Linux Relay。
+3. 接入有界异步 ffplay 输出，形成不绕过 Receiver Pipeline 的实时预览；
+4. 改造 SemiPlayer 实时 AU 输入并实现输出 Adapter；
+5. 完成 Publisher -> Receiver -> SemiPlayer 直连播放；
+6. 注入丢包、乱序和损坏 FU-A，验证只从完整 IDR 恢复；
+7. 完成 1080p30、30 分钟稳定性和端到端指标报告；
+8. 视频直连闭环稳定后，再设计 Linux Relay。
 
 首版设计优先保证边界清晰、行为有界、故障可解释和闭环可复现，不为尚未实现的音频、反馈或
 多路会话提前增加抽象。
