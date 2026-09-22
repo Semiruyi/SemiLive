@@ -42,6 +42,13 @@ jobs:
             mingw-w64-ucrt-x86_64-spdlog
             mingw-w64-ucrt-x86_64-ffmpeg
 
+      - name: Verify FFmpeg development packages
+        run: |
+          if ! pkg-config --exists libavutil libswscale; then
+            pacman --noconfirm -S mingw-w64-ucrt-x86_64-ffmpeg
+          fi
+          pkg-config --modversion libavutil libswscale
+
       - name: Configure
         run: cmake --preset windows-debug
 
