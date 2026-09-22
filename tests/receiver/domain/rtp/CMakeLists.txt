@@ -51,3 +51,18 @@ add_test(
     NAME semilive_receiver_rtp_timestamp_mapper
     COMMAND semilive_receiver_rtp_timestamp_mapper_test
 )
+
+add_executable(semilive_receiver_rtp_reception_statistics_test
+    rtp_reception_statistics_test.cpp
+)
+target_link_libraries(
+    semilive_receiver_rtp_reception_statistics_test
+    PRIVATE
+        SemiLive::ReceiverDomain
+)
+semilive_enable_warnings(semilive_receiver_rtp_reception_statistics_test)
+
+add_test(
+    NAME semilive_receiver_rtp_reception_statistics
+    COMMAND semilive_receiver_rtp_reception_statistics_test
+)

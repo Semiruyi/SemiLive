@@ -30,7 +30,8 @@ public:
         DefaultVideoReceiveWorkerConfig config,
         std::unique_ptr<contracts::network::DatagramSourceBackend> input,
         std::unique_ptr<H264RtpReceivePipeline> pipeline,
-        std::unique_ptr<contracts::output::LiveVideoOutputBackend> output);
+        std::unique_ptr<contracts::output::LiveVideoOutputBackend> output,
+        std::unique_ptr<ReceiverRtcpWorker> rtcp = {});
     ~DefaultVideoReceiveWorker() override;
 
     DefaultVideoReceiveWorker(const DefaultVideoReceiveWorker&) = delete;

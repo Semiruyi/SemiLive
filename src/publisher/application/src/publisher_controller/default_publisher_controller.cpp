@@ -3,6 +3,7 @@
 #include <semilive/publisher/domain/worker/video_capture_worker/video_capture_worker_events.hpp>
 #include <semilive/publisher/domain/worker/video_encoder_worker/video_encoder_worker_events.hpp>
 #include <semilive/publisher/domain/worker/video_output_worker/video_output_worker_events.hpp>
+#include <semilive/publisher/domain/rtcp/publisher_rtcp_worker_events.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -64,6 +65,13 @@ PublisherControllerIssue output_issue(
     return {operation, std::move(issue), std::move(message)};
 }
 
+PublisherControllerIssue rtcp_issue(
+    const PublisherControllerOperation operation,
+    domain::PublisherRtcpWorkerIssue issue) {
+    auto message = issue.message;
+    return {operation, std::move(issue), std::move(message)};
+}
+
 }  // namespace
 
 struct DefaultPublisherController::Impl {
@@ -114,6 +122,7 @@ struct DefaultPublisherController::Impl {
           capture_worker_{&pipeline.capture_worker},
           encoder_worker_{&pipeline.encoder_worker},
           output_worker_{&pipeline.output_worker},
+          rtcp_worker_{pipeline.rtcp_worker},
           frame_store_{&pipeline.frame_store},
           access_unit_queue_{&pipeline.access_unit_queue},
           notifier_{std::move(notifier)} {
@@ -176,6 +185,7 @@ struct DefaultPublisherController::Impl {
     domain::VideoCaptureWorker* capture_worker_ = nullptr;
     domain::VideoEncoderWorker* encoder_worker_ = nullptr;
     domain::VideoOutputWorker* output_worker_ = nullptr;
+    domain::PublisherRtcpWorker* rtcp_worker_ = nullptr;
     domain::CapturedVideoFrameStoreControl* frame_store_ = nullptr;
     domain::EncodedVideoAccessUnitQueueControl* access_unit_queue_ = nullptr;
     std::shared_ptr<contracts::Notifier> notifier_;
@@ -185,6 +195,7 @@ struct DefaultPublisherController::Impl {
     std::shared_ptr<contracts::Notifier::Subscription> capture_subscription_;
     std::shared_ptr<contracts::Notifier::Subscription> encoder_subscription_;
     std::shared_ptr<contracts::Notifier::Subscription> output_subscription_;
+    std::shared_ptr<contracts::Notifier::Subscription> rtcp_subscription_;
 
     mutable std::mutex mutex_;
     std::condition_variable_any command_cv_;
@@ -207,6 +218,7 @@ struct DefaultPublisherController::Impl {
     bool capture_started_ = false;
     bool encoder_started_ = false;
     bool output_started_ = false;
+    bool rtcp_started_ = false;
     bool failure_recorded_for_session_ = false;
     std::vector<std::promise<PublisherStopResult>> stop_waiters_;
     std::jthread drain_thread_;
@@ -280,6 +292,9 @@ PublisherControllerStats DefaultPublisherController::Impl::stats() const noexcep
     result.capture = capture_worker_->stats();
     result.encoder = encoder_worker_->stats();
     result.output = output_worker_->stats();
+    if (rtcp_worker_) {
+        result.rtcp = rtcp_worker_->stats();
+    }
     return result;
 }
 
@@ -462,6 +477,7 @@ void DefaultPublisherController::Impl::start_session(StartCommand& command) {
     capture_started_ = false;
     encoder_started_ = false;
     output_started_ = false;
+    rtcp_started_ = false;
     last_cleanup_ = clear_resources();
 
     const auto timeline =
@@ -475,6 +491,19 @@ void DefaultPublisherController::Impl::start_session(StartCommand& command) {
         return;
     }
     output_started_ = true;
+
+    std::optional<common::rtcp::TransportInfo> rtcp_started;
+    if (rtcp_worker_) {
+        auto started = rtcp_worker_->start();
+        if (!started) {
+            fail_start(command, rtcp_issue(
+                                    PublisherControllerOperation::StartRtcp,
+                                    std::move(started.error())));
+            return;
+        }
+        rtcp_started = *started;
+        rtcp_started_ = true;
+    }
 
     auto encoder_started = encoder_worker_->start(
         domain::VideoEncoderSessionConfig{plan_.encoder});
@@ -512,6 +541,7 @@ void DefaultPublisherController::Impl::start_session(StartCommand& command) {
         std::move(*capture_started),
         std::move(*encoder_started),
         std::move(*output_started),
+        std::move(rtcp_started),
     });
 }
 
@@ -584,6 +614,10 @@ void DefaultPublisherController::Impl::launch_drain(const DrainStage stage) {
 }
 
 void DefaultPublisherController::Impl::finish_normal_stop() {
+    if (rtcp_started_ && rtcp_worker_) {
+        rtcp_worker_->stop();
+        rtcp_started_ = false;
+    }
     last_cleanup_ = clear_resources();
     {
         std::lock_guard lock{mutex_};
@@ -638,6 +672,10 @@ void DefaultPublisherController::Impl::abort_started_pipeline() noexcept {
         } catch (...) {
         }
         output_started_ = false;
+    }
+    if (rtcp_started_ && rtcp_worker_) {
+        rtcp_worker_->stop();
+        rtcp_started_ = false;
     }
 }
 
@@ -706,6 +744,19 @@ void DefaultPublisherController::Impl::subscribe_to_failures() {
                     PublisherControllerOperation::VideoOutputFailed,
                     event.issue));
             });
+    if (rtcp_worker_) {
+        rtcp_subscription_ =
+            notifier_->subscribe<domain::PublisherRtcpWorkerFailed>(
+                [this](const domain::PublisherRtcpWorkerFailed& event) {
+                    std::lock_guard callback_lock{callback_mutex_};
+                    if (!failure_callbacks_enabled_) {
+                        return;
+                    }
+                    enqueue_failure(rtcp_issue(
+                        PublisherControllerOperation::RtcpFailed,
+                        event.issue));
+                });
+    }
 }
 
 void DefaultPublisherController::Impl::enqueue_failure(
@@ -757,9 +808,13 @@ void DefaultPublisherController::Impl::disable_failure_callbacks() noexcept {
     if (output_subscription_) {
         (void)output_subscription_->unsubscribe();
     }
+    if (rtcp_subscription_) {
+        (void)rtcp_subscription_->unsubscribe();
+    }
     capture_subscription_.reset();
     encoder_subscription_.reset();
     output_subscription_.reset();
+    rtcp_subscription_.reset();
 }
 
 void DefaultPublisherController::Impl::shutdown() noexcept {

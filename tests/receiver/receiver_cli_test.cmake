@@ -307,3 +307,19 @@ if(unknown_result EQUAL 0 OR
         "stdout=${unknown_stdout}, stderr=${unknown_stderr}"
     )
 endif()
+
+execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}" --rtcp-bind-port 5007
+    RESULT_VARIABLE partial_rtcp_result
+    OUTPUT_VARIABLE partial_rtcp_stdout
+    ERROR_VARIABLE partial_rtcp_stderr
+)
+if(partial_rtcp_result EQUAL 0 OR
+   NOT partial_rtcp_stderr MATCHES
+       "RTCP requires --rtcp-bind-port, --rtcp-peer-address, and --rtcp-peer-port")
+    message(FATAL_ERROR
+        "receiver accepted a partial RTCP endpoint: "
+        "result=${partial_rtcp_result}, stdout=${partial_rtcp_stdout}, "
+        "stderr=${partial_rtcp_stderr}"
+    )
+endif()

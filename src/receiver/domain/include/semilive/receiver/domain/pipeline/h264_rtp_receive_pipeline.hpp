@@ -17,6 +17,8 @@
 
 namespace semilive::receiver::domain {
 
+class RtpReceptionStatistics;
+
 struct H264RtpReceivePipelineConfig {
     RtpSessionConfig session;
     RtpReorderConfig reorder;
@@ -54,7 +56,8 @@ public:
     using Clock = model::UdpDatagram::Clock;
 
     explicit H264RtpReceivePipeline(
-        H264RtpReceivePipelineConfig config = {});
+        H264RtpReceivePipelineConfig config = {},
+        std::shared_ptr<RtpReceptionStatistics> reception_statistics = {});
     ~H264RtpReceivePipeline();
 
     H264RtpReceivePipeline(const H264RtpReceivePipeline&) = delete;

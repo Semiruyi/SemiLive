@@ -74,6 +74,12 @@ void print_help() {
            "                                    (default: 96)\n"
            "  --rtp-max-datagram-bytes SIZE     Maximum UDP payload bytes\n"
            "                                    (default: 1200)\n"
+           "  --rtcp-bind-address ADDRESS       RTCP listen IPv4 or IPv6 address\n"
+           "                                    (default: 0.0.0.0)\n"
+           "  --rtcp-bind-port PORT             RTCP listen UDP port\n"
+           "  --rtcp-peer-address ADDRESS       Receiver RTCP IPv4 or IPv6 address\n"
+           "  --rtcp-peer-port PORT             Receiver RTCP UDP port\n"
+           "  --rtcp-report-interval-ms MS      SR interval (default: 1000)\n"
            "  --display TARGET                  Capture primary or zero-based\n"
            "                                    display INDEX (default: primary)\n"
            "  --no-pointer                      Do not compose the mouse pointer\n"
@@ -92,6 +98,11 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
     bool rtp_port_set = false;
     bool rtp_payload_type_set = false;
     bool rtp_max_datagram_bytes_set = false;
+    bool rtcp_bind_address_set = false;
+    bool rtcp_bind_port_set = false;
+    bool rtcp_peer_address_set = false;
+    bool rtcp_peer_port_set = false;
+    bool rtcp_report_interval_set = false;
     bool display_set = false;
     bool pointer_disabled = false;
     bool stats_json_set = false;
@@ -202,6 +213,97 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
             continue;
         }
 
+        if (argument == "--rtcp-bind-address" ||
+            argument == "--rtcp-peer-address") {
+            auto& already_set = argument == "--rtcp-bind-address"
+                                    ? rtcp_bind_address_set
+                                    : rtcp_peer_address_set;
+            if (already_set) {
+                return std::unexpected{std::string{argument} +
+                                       " may only be specified once"};
+            }
+            if (++index >= argc || std::string_view{argv[index]}.empty()) {
+                return std::unexpected{std::string{argument} +
+                                       " requires an address"};
+            }
+            if (!options.publisher.rtcp) {
+                options.publisher.rtcp.emplace();
+            }
+            if (argument == "--rtcp-bind-address") {
+                options.publisher.rtcp->transport.bind_address = argv[index];
+            } else {
+                options.publisher.rtcp->transport.peer_address = argv[index];
+            }
+            already_set = true;
+            continue;
+        }
+
+        if (argument == "--rtcp-bind-port" ||
+            argument == "--rtcp-peer-port") {
+            auto& already_set = argument == "--rtcp-bind-port"
+                                    ? rtcp_bind_port_set
+                                    : rtcp_peer_port_set;
+            if (already_set) {
+                return std::unexpected{std::string{argument} +
+                                       " may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{std::string{argument} +
+                                       " requires a value"};
+            }
+            const std::string_view text{argv[index]};
+            std::uint32_t port = 0;
+            const auto parsed =
+                std::from_chars(text.data(), text.data() + text.size(), port);
+            if (parsed.ec != std::errc{} ||
+                parsed.ptr != text.data() + text.size() || port == 0 ||
+                port > 65'535) {
+                return std::unexpected{std::string{argument} +
+                                       " requires an integer in 1..65535"};
+            }
+            if (!options.publisher.rtcp) {
+                options.publisher.rtcp.emplace();
+            }
+            if (argument == "--rtcp-bind-port") {
+                options.publisher.rtcp->transport.bind_port =
+                    static_cast<std::uint16_t>(port);
+            } else {
+                options.publisher.rtcp->transport.peer_port =
+                    static_cast<std::uint16_t>(port);
+            }
+            already_set = true;
+            continue;
+        }
+
+        if (argument == "--rtcp-report-interval-ms") {
+            if (rtcp_report_interval_set) {
+                return std::unexpected{
+                    "--rtcp-report-interval-ms may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{
+                    "--rtcp-report-interval-ms requires a value"};
+            }
+            const std::string_view text{argv[index]};
+            std::uint32_t interval = 0;
+            const auto parsed = std::from_chars(
+                text.data(), text.data() + text.size(), interval);
+            if (parsed.ec != std::errc{} ||
+                parsed.ptr != text.data() + text.size() || interval < 100U ||
+                interval > 60'000U) {
+                return std::unexpected{
+                    "--rtcp-report-interval-ms requires an integer in 100..60000"};
+            }
+            if (!options.publisher.rtcp) {
+                options.publisher.rtcp.emplace();
+            }
+            options.publisher.rtcp->report_interval =
+                std::chrono::milliseconds{
+                    static_cast<std::int64_t>(interval)};
+            rtcp_report_interval_set = true;
+            continue;
+        }
+
         if (argument == "--display") {
             if (display_set) {
                 return std::unexpected{"--display may only be specified once"};
@@ -296,6 +398,12 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
         return std::unexpected{
             "--rtp-port is required when --rtp-address is specified"};
     }
+    if (options.publisher.rtcp &&
+        (!rtcp_bind_port_set || !rtcp_peer_address_set ||
+         !rtcp_peer_port_set)) {
+        return std::unexpected{
+            "RTCP requires --rtcp-bind-port, --rtcp-peer-address, and --rtcp-peer-port"};
+    }
     return options;
 }
 
@@ -337,6 +445,8 @@ std::string_view controller_operation_name(
         return "control";
     case Operation::StartOutput:
         return "start-output";
+    case Operation::StartRtcp:
+        return "start-rtcp";
     case Operation::StartEncoder:
         return "start-encoder";
     case Operation::StartCapture:
@@ -347,6 +457,8 @@ std::string_view controller_operation_name(
         return "video-encoder-failed";
     case Operation::VideoOutputFailed:
         return "video-output-failed";
+    case Operation::RtcpFailed:
+        return "rtcp-failed";
     case Operation::StopCapture:
         return "stop-capture";
     case Operation::DrainEncoder:
@@ -394,8 +506,12 @@ void print_started(const app::PublisherStarted& started) {
               << encoder.output.width << 'x' << encoder.output.height << ", "
               << frame_rate.numerator << '/' << frame_rate.denominator
               << " fps, " << encoder.target_bit_rate << " bit/s)\n"
-              << "  output: " << started.output.output.output_name << '\n'
-              << "Press Ctrl+C to stop.\n";
+              << "  output: " << started.output.output.output_name << '\n';
+    if (started.rtcp) {
+        std::cout << "  RTCP: " << started.rtcp->bound_address << ':'
+                  << started.rtcp->bound_port << '\n';
+    }
+    std::cout << "Press Ctrl+C to stop.\n";
 
     SEMILIVE_LOG_INFO(
         "publisher session {} started: source={} {}x{}, encoder={} {}x{} "

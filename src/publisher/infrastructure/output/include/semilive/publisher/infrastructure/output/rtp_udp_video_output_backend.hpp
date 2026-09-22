@@ -1,6 +1,7 @@
 #pragma once
 
 #include <semilive/publisher/contracts/output/video_access_unit_output_backend.hpp>
+#include <semilive/publisher/contracts/output/rtp_sender_observer.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -19,7 +20,10 @@ struct RtpUdpVideoOutputConfig {
 class RtpUdpVideoOutputBackend final
     : public contracts::output::VideoAccessUnitOutputBackend {
 public:
-    explicit RtpUdpVideoOutputBackend(RtpUdpVideoOutputConfig config);
+    explicit RtpUdpVideoOutputBackend(
+        RtpUdpVideoOutputConfig config,
+        std::shared_ptr<contracts::output::RtpSenderObserver> sender_observer =
+            {});
     ~RtpUdpVideoOutputBackend() override;
 
     RtpUdpVideoOutputBackend(const RtpUdpVideoOutputBackend&) = delete;

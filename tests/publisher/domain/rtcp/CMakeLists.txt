@@ -1,0 +1,11 @@
+add_executable(semilive_publisher_rtcp_worker_test
+    publisher_rtcp_worker_test.cpp
+)
+target_link_libraries(semilive_publisher_rtcp_worker_test PRIVATE
+    SemiLive::PublisherDomain
+    semilive_publisher_test_support
+)
+semilive_enable_warnings(semilive_publisher_rtcp_worker_test)
+
+add_test(NAME semilive_publisher_rtcp_worker
+         COMMAND semilive_publisher_rtcp_worker_test)

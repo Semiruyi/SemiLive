@@ -13,11 +13,13 @@ SemiLive 是一个正在开发的 C++23 实时音视频项目，目标是完成�
 - `semilive_receiver`：监听单路 H.264/RTP/UDP，完成 RTP 校验、有限重排、
   Single NAL/FU-A 解包、Access Unit 组装和随机访问恢复，可输出 Annex-B 文件或通过有界异步
   管道交给 ffplay 实时预览；
+- 可选 RTCP 控制通道：Publisher 周期发送 SR，Receiver 根据 RTP 接收状态发送 RR，Publisher
+  计算 RTT；RTCP 使用显式配置的独立 UDP endpoint；
 - `semilive_relay`：单向 UDP 故障注入中转，支持固定 seed 的随机丢包和机器可读统计。
 
 当前 ffplay 输出是阶段验证用的外部预览，不传递 Receiver 媒体时间，也不替代 SemiPlayer 的最终
 实时输入接口；系统音频、
-生产形态的 Linux 媒体 Relay、RTCP 反馈、重传和 WebRTC 仍未实现。当前能力和后续阶段以
+生产形态的 Linux 媒体 Relay、NACK/RTX、PLI、拥塞控制和 WebRTC 仍未实现。当前能力和后续阶段以
 [项目路线图](docs/roadmap.md)为准。
 
 ## 项目目标
@@ -126,6 +128,35 @@ ffplay 消费裸 Annex-B H.264，适合观察丢包后的画面停顿和恢复�
   --rtp-port 5004 \
   --stats-json publisher-stats.json
 ```
+
+需要启用当前只观测、不改变恢复行为的 RTCP SR/RR 时，为两端显式配置独立端口。先启动
+Receiver：
+
+```sh
+./build/windows-debug/bin/semilive_receiver.exe \
+  --bind-address 0.0.0.0 \
+  --bind-port 5004 \
+  --rtcp-bind-address 0.0.0.0 \
+  --rtcp-bind-port 5007 \
+  --rtcp-peer-address 127.0.0.1 \
+  --rtcp-peer-port 5005 \
+  --output-mode ffplay
+```
+
+再启动 Publisher：
+
+```sh
+./build/windows-debug/bin/semilive_publisher.exe \
+  --rtp-address 127.0.0.1 \
+  --rtp-port 5004 \
+  --rtcp-bind-address 0.0.0.0 \
+  --rtcp-bind-port 5005 \
+  --rtcp-peer-address 127.0.0.1 \
+  --rtcp-peer-port 5007
+```
+
+当前 RTCP 通道使用 SR/RR、Report Block 和 SDES CNAME，尚不发送 NACK、RTX 或 PLI。RTP 与
+RTCP 不做端口复用，也不使用隐含的“RTP 端口加一”规则。
 
 Publisher 正常停止后会写出视频/GOP/码率和 RTP 配置，以及采集帧、编码 AU、关键帧、原始媒体
 RTP datagram 与字节数，作为 Receiver 丢包率和后续反馈/重传开销的发送端分母。

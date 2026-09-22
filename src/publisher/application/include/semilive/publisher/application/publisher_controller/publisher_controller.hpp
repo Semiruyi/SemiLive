@@ -3,6 +3,7 @@
 #include <semilive/publisher/domain/resource/captured_video_frame_store/captured_video_frame_store_control.hpp>
 #include <semilive/publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue_control.hpp>
 #include <semilive/publisher/domain/timing/session_timeline.hpp>
+#include <semilive/publisher/domain/rtcp/publisher_rtcp_worker.hpp>
 #include <semilive/publisher/domain/worker/video_capture_worker/video_capture_worker.hpp>
 #include <semilive/publisher/domain/worker/video_encoder_worker/video_encoder_worker.hpp>
 #include <semilive/publisher/domain/worker/video_output_worker/video_output_worker.hpp>
@@ -29,6 +30,7 @@ struct PublisherVideoPipeline {
     domain::VideoOutputWorker& output_worker;
     domain::CapturedVideoFrameStoreControl& frame_store;
     domain::EncodedVideoAccessUnitQueueControl& access_unit_queue;
+    domain::PublisherRtcpWorker* rtcp_worker = nullptr;
 };
 
 enum class PublisherControllerState : std::uint8_t {
@@ -42,11 +44,13 @@ enum class PublisherControllerState : std::uint8_t {
 enum class PublisherControllerOperation : std::uint8_t {
     Control,
     StartOutput,
+    StartRtcp,
     StartEncoder,
     StartCapture,
     VideoCaptureFailed,
     VideoEncoderFailed,
     VideoOutputFailed,
+    RtcpFailed,
     StopCapture,
     DrainEncoder,
     DrainOutput,
@@ -59,7 +63,8 @@ using PublisherFailureDetail =
     std::variant<std::monostate,
                  domain::VideoCaptureWorkerIssue,
                  domain::VideoEncoderWorkerIssue,
-                 domain::VideoOutputWorkerIssue>;
+                 domain::VideoOutputWorkerIssue,
+                 domain::PublisherRtcpWorkerIssue>;
 
 struct PublisherControllerIssue {
     PublisherControllerOperation operation =
@@ -75,6 +80,7 @@ struct PublisherStarted {
     domain::VideoCaptureStarted capture;
     domain::VideoEncoderStarted encoder;
     domain::VideoOutputStarted output;
+    std::optional<common::rtcp::TransportInfo> rtcp;
 };
 
 struct PublisherStopped {
@@ -99,6 +105,7 @@ struct PublisherControllerStats {
     domain::VideoCaptureWorkerStats capture;
     domain::VideoEncoderWorkerStats encoder;
     domain::VideoOutputWorkerStats output;
+    std::optional<domain::PublisherRtcpWorkerStats> rtcp;
     std::optional<PublisherControllerIssue> last_issue;
 };
 

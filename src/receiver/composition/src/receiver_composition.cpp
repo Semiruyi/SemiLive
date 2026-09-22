@@ -2,9 +2,12 @@
 
 #include <semilive/receiver/application/default_receiver_controller.hpp>
 #include <semilive/receiver/domain/worker/default_video_receive_worker.hpp>
+#include <semilive/receiver/domain/rtcp/default_receiver_rtcp_worker.hpp>
+#include <semilive/receiver/domain/rtp/rtp_reception_statistics.hpp>
 #include <semilive/receiver/infrastructure/network/udp_datagram_source_backend.hpp>
 #include <semilive/receiver/infrastructure/output/ffplay/ffplay_video_output_backend.hpp>
 #include <semilive/receiver/infrastructure/output/file/h264_file_output_backend.hpp>
+#include <semilive/common/rtcp/udp_rtcp_transport.hpp>
 
 #include <exception>
 #include <memory>
@@ -74,8 +77,10 @@ ReceiverCompositionResult ReceiverComposition::Impl::assemble() {
     try {
         auto input =
             std::make_unique<infra::network::UdpDatagramSourceBackend>();
+        auto reception_statistics =
+            std::make_shared<domain::RtpReceptionStatistics>();
         auto pipeline = std::make_unique<domain::H264RtpReceivePipeline>(
-            config_.pipeline);
+            config_.pipeline, reception_statistics);
         std::unique_ptr<contracts::output::LiveVideoOutputBackend> output;
         if (config_.output_mode == ReceiverVideoOutputMode::Ffplay) {
             infra::output::FfplayVideoOutputConfig ffplay_config;
@@ -93,9 +98,22 @@ ReceiverCompositionResult ReceiverComposition::Impl::assemble() {
         domain::DefaultVideoReceiveWorkerConfig worker_config{
             config_.input, config_.receive_poll_interval,
             config_.output_stall_threshold};
+        std::unique_ptr<domain::ReceiverRtcpWorker> rtcp;
+        if (config_.rtcp) {
+            domain::ReceiverRtcpWorkerConfig rtcp_config{
+                config_.rtcp->transport,
+                config_.rtcp->report_interval,
+                config_.rtcp->receive_poll_interval,
+                std::nullopt,
+            };
+            rtcp = std::make_unique<domain::DefaultReceiverRtcpWorker>(
+                std::move(rtcp_config),
+                std::make_unique<common::rtcp::UdpTransport>(),
+                reception_statistics);
+        }
         worker_ = std::make_unique<domain::DefaultVideoReceiveWorker>(
             std::move(worker_config), std::move(input), std::move(pipeline),
-            std::move(output));
+            std::move(output), std::move(rtcp));
 
         operation = ReceiverCompositionOperation::CreateController;
         controller_ =

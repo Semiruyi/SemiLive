@@ -1,6 +1,7 @@
 #include <semilive/receiver/domain/pipeline/h264_rtp_receive_pipeline.hpp>
 
 #include <semilive/receiver/domain/rtp/rtp_parser.hpp>
+#include <semilive/receiver/domain/rtp/rtp_reception_statistics.hpp>
 
 #include <stdexcept>
 #include <utility>
@@ -47,12 +48,14 @@ validate_h264_rtp_receive_pipeline_config(
 }
 
 struct H264RtpReceivePipeline::Impl {
-    explicit Impl(const H264RtpReceivePipelineConfig& config)
+    Impl(const H264RtpReceivePipelineConfig& config,
+         std::shared_ptr<RtpReceptionStatistics> reception_statistics)
         : session_filter_{config.session},
           reorder_{config.reorder},
           depacketizer_{config.depacketizer},
           assembler_{config.assembler},
-          timestamp_mapper_{config.timestamp_mapper} {}
+          timestamp_mapper_{config.timestamp_mapper},
+          reception_statistics_{std::move(reception_statistics)} {}
 
     [[nodiscard]] H264RtpReceivePipelineOutputs push(
         model::UdpDatagram datagram);
@@ -83,6 +86,7 @@ struct H264RtpReceivePipeline::Impl {
     H264AccessUnitAssembler assembler_;
     H264RecoveryGate recovery_gate_;
     RtpTimestampMapper timestamp_mapper_;
+    std::shared_ptr<RtpReceptionStatistics> reception_statistics_;
     std::uint64_t received_datagrams_ = 0;
     std::uint64_t parse_failures_ = 0;
     std::uint64_t session_drops_ = 0;
@@ -105,6 +109,11 @@ H264RtpReceivePipelineOutputs H264RtpReceivePipeline::Impl::push(
     if (accepted == nullptr) {
         ++session_drops_;
         return {};
+    }
+    if (reception_statistics_) {
+        reception_statistics_->observe(
+            accepted->packet.ssrc(), accepted->packet.sequence_number(),
+            accepted->packet.timestamp(), accepted->packet.received_at());
     }
     return process(reorder_.push(std::move(accepted->packet)), observed_at);
 }
@@ -143,6 +152,9 @@ void H264RtpReceivePipeline::Impl::reset() noexcept {
     assembler_.reset();
     recovery_gate_.reset();
     timestamp_mapper_.reset();
+    if (reception_statistics_) {
+        reception_statistics_->reset();
+    }
     received_datagrams_ = 0;
     parse_failures_ = 0;
     session_drops_ = 0;
@@ -203,12 +215,13 @@ void H264RtpReceivePipeline::Impl::process_assembler_event(
 }
 
 H264RtpReceivePipeline::H264RtpReceivePipeline(
-    H264RtpReceivePipelineConfig config) {
+    H264RtpReceivePipelineConfig config,
+    std::shared_ptr<RtpReceptionStatistics> reception_statistics) {
     const auto valid = validate_h264_rtp_receive_pipeline_config(config);
     if (!valid) {
         throw std::invalid_argument{valid.error()};
     }
-    impl_ = std::make_unique<Impl>(config);
+    impl_ = std::make_unique<Impl>(config, std::move(reception_statistics));
 }
 
 H264RtpReceivePipeline::~H264RtpReceivePipeline() = default;

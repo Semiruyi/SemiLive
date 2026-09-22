@@ -4,12 +4,15 @@
 #include <semilive/publisher/contracts/notifier/notifier.hpp>
 #include <semilive/publisher/domain/resource/captured_video_frame_store/captured_video_frame_store.hpp>
 #include <semilive/publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue.hpp>
+#include <semilive/publisher/domain/rtcp/default_publisher_rtcp_worker.hpp>
+#include <semilive/publisher/domain/rtp/rtp_sender_state.hpp>
 #include <semilive/publisher/domain/worker/video_capture_worker/default_video_capture_worker.hpp>
 #include <semilive/publisher/domain/worker/video_encoder_worker/default_video_encoder_worker.hpp>
 #include <semilive/publisher/domain/worker/video_output_worker/default_video_output_worker.hpp>
 #include <semilive/publisher/infrastructure/ffmpeg/video_encoder/ffmpeg_h264_encoder_backend.hpp>
 #include <semilive/publisher/infrastructure/notifier/default_notifier.hpp>
 #include <semilive/publisher/infrastructure/output/rtp_udp_video_output_backend.hpp>
+#include <semilive/common/rtcp/udp_rtcp_transport.hpp>
 
 #if defined(_WIN32)
 #include <semilive/publisher/infrastructure/capture/dxgi_desktop_capture_backend.hpp>
@@ -69,6 +72,8 @@ struct PublisherComposition::Impl {
     std::unique_ptr<domain::CapturedVideoFrameStore> frame_store_;
     std::unique_ptr<domain::EncodedVideoAccessUnitQueue> access_unit_queue_;
     std::unique_ptr<domain::DefaultVideoOutputWorker> output_worker_;
+    std::shared_ptr<domain::RtpSenderState> rtp_sender_state_;
+    std::unique_ptr<domain::DefaultPublisherRtcpWorker> rtcp_worker_;
     std::unique_ptr<domain::DefaultVideoEncoderWorker> encoder_worker_;
     std::unique_ptr<domain::DefaultVideoCaptureWorker> capture_worker_;
     std::unique_ptr<application::DefaultPublisherController> controller_;
@@ -113,6 +118,17 @@ PublisherCompositionResult PublisherComposition::Impl::assemble() {
             PublisherCompositionOperation::ValidateConfig,
             "publisher video recovery timeout must be positive")};
     }
+    if (config_.rtcp &&
+        (config_.rtcp->transport.bind_address.empty() ||
+         config_.rtcp->transport.peer_address.empty() ||
+         config_.rtcp->transport.peer_port == 0 ||
+         config_.rtcp->report_interval <= std::chrono::milliseconds::zero() ||
+         config_.rtcp->receive_poll_interval <=
+             std::chrono::milliseconds::zero())) {
+        return std::unexpected{make_issue(
+            PublisherCompositionOperation::ValidateConfig,
+            "publisher RTCP endpoint and intervals are invalid")};
+    }
 
 #if !defined(_WIN32)
     return std::unexpected{make_issue(
@@ -128,6 +144,7 @@ PublisherCompositionResult PublisherComposition::Impl::assemble() {
             std::make_unique<domain::CapturedVideoFrameStore>(notifier_);
         access_unit_queue_ =
             std::make_unique<domain::EncodedVideoAccessUnitQueue>(notifier_);
+        rtp_sender_state_ = std::make_shared<domain::RtpSenderState>();
 
         operation = PublisherCompositionOperation::CreateOutputWorker;
         output_worker_ = std::make_unique<domain::DefaultVideoOutputWorker>(
@@ -137,8 +154,22 @@ PublisherCompositionResult PublisherComposition::Impl::assemble() {
                     rtp.destination_port,
                     rtp.payload_type,
                     rtp.max_datagram_bytes,
-                }),
+                }, rtp_sender_state_),
             *access_unit_queue_, notifier_);
+
+        if (config_.rtcp) {
+            domain::PublisherRtcpWorkerConfig rtcp_config{
+                config_.rtcp->transport,
+                config_.rtcp->report_interval,
+                config_.rtcp->receive_poll_interval,
+                90'000U,
+            };
+            rtcp_worker_ =
+                std::make_unique<domain::DefaultPublisherRtcpWorker>(
+                    std::move(rtcp_config),
+                    std::make_unique<common::rtcp::UdpTransport>(),
+                    rtp_sender_state_, notifier_);
+        }
 
         operation = PublisherCompositionOperation::CreateEncoderWorker;
         encoder_worker_ = std::make_unique<domain::DefaultVideoEncoderWorker>(
@@ -162,6 +193,7 @@ PublisherCompositionResult PublisherComposition::Impl::assemble() {
             *output_worker_,
             *frame_store_,
             *access_unit_queue_,
+            rtcp_worker_.get(),
         };
         controller_ =
             std::make_unique<application::DefaultPublisherController>(
@@ -232,6 +264,8 @@ void PublisherComposition::Impl::reset_graph() noexcept {
     capture_worker_.reset();
     encoder_worker_.reset();
     output_worker_.reset();
+    rtcp_worker_.reset();
+    rtp_sender_state_.reset();
     access_unit_queue_.reset();
     frame_store_.reset();
     notifier_.reset();

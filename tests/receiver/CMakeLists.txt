@@ -13,6 +13,7 @@ add_test(
 
 add_subdirectory(contracts)
 add_subdirectory(domain/rtp)
+add_subdirectory(domain/rtcp)
 add_subdirectory(domain/h264)
 add_subdirectory(domain/pipeline)
 add_subdirectory(domain/worker)

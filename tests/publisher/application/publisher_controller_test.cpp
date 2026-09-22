@@ -378,6 +378,40 @@ private:
     std::optional<domain::VideoOutputWorkerIssue> start_issue_;
 };
 
+class RecordingRtcpWorker final : public domain::PublisherRtcpWorker {
+public:
+    explicit RecordingRtcpWorker(CallLog& calls) : calls_{&calls} {}
+
+    [[nodiscard]] domain::PublisherRtcpStartResult start() override {
+        calls_->record("rtcp.start");
+        state_ = domain::PublisherRtcpWorkerState::Running;
+        return semilive::common::rtcp::TransportInfo{
+            "127.0.0.1", 5005, 1500, 262144};
+    }
+
+    void stop() noexcept override {
+        calls_->record("rtcp.stop");
+        state_ = domain::PublisherRtcpWorkerState::Idle;
+    }
+
+    [[nodiscard]] domain::PublisherRtcpWorkerState state() const noexcept
+        override {
+        return state_;
+    }
+
+    [[nodiscard]] domain::PublisherRtcpWorkerStats stats() const noexcept
+        override {
+        domain::PublisherRtcpWorkerStats result;
+        result.state = state_;
+        return result;
+    }
+
+private:
+    CallLog* calls_ = nullptr;
+    domain::PublisherRtcpWorkerState state_ =
+        domain::PublisherRtcpWorkerState::Idle;
+};
+
 struct Fixture {
     Fixture(const std::size_t frame_count = 0,
             const std::size_t access_unit_count = 0)
@@ -498,6 +532,30 @@ void normal_lifecycle_is_ordered_and_repeatable() {
             "controller must support a second session after normal stop");
     require(controller.stop_publishing().has_value(),
             "second publisher session must stop normally");
+}
+
+void rtcp_lifecycle_follows_the_rtp_output() {
+    Fixture fixture;
+    RecordingRtcpWorker rtcp{fixture.calls};
+    auto pipeline = fixture.pipeline();
+    pipeline.rtcp_worker = &rtcp;
+    app::DefaultPublisherController controller{
+        fixture.plan(), pipeline, fixture.notifier};
+
+    const auto started = controller.start_publishing();
+    require(started.has_value() && started->rtcp &&
+                started->rtcp->bound_port == 5005,
+            "publisher controller did not expose RTCP startup information");
+    require(controller.stop_publishing().has_value(),
+            "publisher with RTCP did not stop normally");
+    const auto calls = call_names(fixture.calls);
+    require(call_index(calls, "output.start") <
+                call_index(calls, "rtcp.start") &&
+                call_index(calls, "rtcp.start") <
+                    call_index(calls, "encoder.start") &&
+                call_index(calls, "output.drain") <
+                    call_index(calls, "rtcp.stop"),
+            "publisher controller RTCP lifecycle order is incorrect");
 }
 
 void output_and_capture_start_failures_rollback_exact_scope() {
@@ -699,6 +757,7 @@ void destructor_aborts_and_unsubscribes() {
 int main() {
     try {
         normal_lifecycle_is_ordered_and_repeatable();
+        rtcp_lifecycle_follows_the_rtp_output();
         output_and_capture_start_failures_rollback_exact_scope();
         encoder_start_failure_rolls_back_started_output();
         runtime_failure_aborts_and_requires_acknowledgement();

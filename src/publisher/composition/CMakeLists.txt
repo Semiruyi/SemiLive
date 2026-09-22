@@ -19,5 +19,6 @@ target_link_libraries(semilive_publisher_composition
         SemiLive::PublisherInfraFfmpeg
         SemiLive::PublisherInfraNotifier
         SemiLive::PublisherInfraOutput
+        SemiLive::CommonRtcpUdp
 )
 semilive_enable_warnings(semilive_publisher_composition)

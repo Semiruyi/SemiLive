@@ -2,11 +2,13 @@
 
 #include <semilive/publisher/contracts/capture/desktop_capture_backend.hpp>
 #include <semilive/publisher/contracts/encoder/video_encoder_backend.hpp>
+#include <semilive/common/rtcp/rtcp_transport.hpp>
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <optional>
 
 namespace semilive::publisher::composition {
 
@@ -27,9 +29,16 @@ struct PublisherVideoOutputConfig {
     RtpUdpVideoOutputConfig rtp_udp;
 };
 
+struct PublisherRtcpConfig {
+    common::rtcp::TransportConfig transport;
+    std::chrono::milliseconds report_interval{1000};
+    std::chrono::milliseconds receive_poll_interval{20};
+};
+
 struct PublisherConfig {
     PublisherVideoConfig video;
     PublisherVideoOutputConfig output;
+    std::optional<PublisherRtcpConfig> rtcp;
 };
 
 }  // namespace semilive::publisher::composition

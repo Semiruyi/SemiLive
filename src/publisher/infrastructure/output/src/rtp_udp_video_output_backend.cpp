@@ -4,6 +4,7 @@
 #include "udp_socket.hpp"
 
 #include <array>
+#include <chrono>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -133,8 +134,10 @@ struct RtpUdpVideoOutputBackend::Impl {
         Failed,
     };
 
-    explicit Impl(RtpUdpVideoOutputConfig config)
-        : config{std::move(config)} {}
+    Impl(RtpUdpVideoOutputConfig config,
+         std::shared_ptr<contracts::output::RtpSenderObserver> sender_observer)
+        : config{std::move(config)},
+          sender_observer{std::move(sender_observer)} {}
 
     [[nodiscard]] contracts::output::VideoOutputOpenResult open();
     [[nodiscard]] contracts::output::VideoOutputConsumeResult consume(
@@ -145,6 +148,7 @@ struct RtpUdpVideoOutputBackend::Impl {
     RtpUdpVideoOutputConfig config;
     detail::UdpSocket socket;
     std::unique_ptr<detail::H264RtpPacketizer> packetizer;
+    std::shared_ptr<contracts::output::RtpSenderObserver> sender_observer;
     detail::RtpSessionState session;
     State state = State::Closed;
 };
@@ -184,6 +188,9 @@ RtpUdpVideoOutputBackend::Impl::open() {
         return std::unexpected{std::move(random_state.error())};
     }
     session = *random_state;
+    if (sender_observer) {
+        sender_observer->begin_session(session.ssrc);
+    }
 
     packetizer = std::move(new_packetizer);
     state = State::Open;
@@ -212,6 +219,12 @@ RtpUdpVideoOutputBackend::Impl::consume(
                 return std::unexpected{send_issue->message};
             }
             ++sent_datagrams;
+            if (sender_observer && datagram.size() >= 12U) {
+                sender_observer->record_sent_packet(
+                    read_u32(datagram.subspan(4U, 4U)),
+                    datagram.size() - 12U,
+                    std::chrono::steady_clock::now());
+            }
             return {};
         });
     if (!packetized) {
@@ -242,14 +255,19 @@ RtpUdpVideoOutputBackend::Impl::flush() {
 }
 
 void RtpUdpVideoOutputBackend::Impl::close() noexcept {
+    if (sender_observer) {
+        sender_observer->end_session();
+    }
     socket.close();
     packetizer.reset();
     state = State::Closed;
 }
 
 RtpUdpVideoOutputBackend::RtpUdpVideoOutputBackend(
-    RtpUdpVideoOutputConfig config)
-    : impl_{std::make_unique<Impl>(std::move(config))} {}
+    RtpUdpVideoOutputConfig config,
+    std::shared_ptr<contracts::output::RtpSenderObserver> sender_observer)
+    : impl_{std::make_unique<Impl>(std::move(config),
+                                  std::move(sender_observer))} {}
 
 RtpUdpVideoOutputBackend::~RtpUdpVideoOutputBackend() {
     impl_->close();

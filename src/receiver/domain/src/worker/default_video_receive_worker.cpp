@@ -20,21 +20,32 @@ namespace output_contract = contracts::output;
 [[nodiscard]] VideoReceiveWorkerIssue make_issue(
     const VideoReceiveWorkerOperation operation,
     std::string message) {
-    return {operation, std::nullopt, std::nullopt, std::move(message)};
+    return {operation, std::nullopt, std::nullopt, std::nullopt,
+            std::move(message)};
 }
 
 [[nodiscard]] VideoReceiveWorkerIssue make_input_issue(
     const VideoReceiveWorkerOperation operation,
     input_contract::DatagramSourceIssue issue) {
     auto message = issue.message;
-    return {operation, std::move(issue), std::nullopt, std::move(message)};
+    return {operation, std::move(issue), std::nullopt, std::nullopt,
+            std::move(message)};
 }
 
 [[nodiscard]] VideoReceiveWorkerIssue make_output_issue(
     const VideoReceiveWorkerOperation operation,
     output_contract::LiveVideoOutputIssue issue) {
     auto message = issue.message;
-    return {operation, std::nullopt, std::move(issue), std::move(message)};
+    return {operation, std::nullopt, std::move(issue), std::nullopt,
+            std::move(message)};
+}
+
+[[nodiscard]] VideoReceiveWorkerIssue make_rtcp_issue(
+    const VideoReceiveWorkerOperation operation,
+    ReceiverRtcpWorkerIssue issue) {
+    auto message = issue.message;
+    return {operation, std::nullopt, std::nullopt, std::move(issue),
+            std::move(message)};
 }
 
 }  // namespace
@@ -59,11 +70,13 @@ struct DefaultVideoReceiveWorker::Impl {
     Impl(DefaultVideoReceiveWorkerConfig config,
          std::unique_ptr<input_contract::DatagramSourceBackend> input,
          std::unique_ptr<H264RtpReceivePipeline> pipeline,
-         std::unique_ptr<output_contract::LiveVideoOutputBackend> output)
+         std::unique_ptr<output_contract::LiveVideoOutputBackend> output,
+         std::unique_ptr<ReceiverRtcpWorker> rtcp)
         : config_{std::move(config)},
           input_{std::move(input)},
           pipeline_{std::move(pipeline)},
-          output_{std::move(output)} {
+          output_{std::move(output)},
+          rtcp_{std::move(rtcp)} {
         if (!input_ || !pipeline_ || !output_) {
             throw std::invalid_argument{
                 "video receive worker dependencies must not be null"};
@@ -106,8 +119,10 @@ struct DefaultVideoReceiveWorker::Impl {
     std::unique_ptr<input_contract::DatagramSourceBackend> input_;
     std::unique_ptr<H264RtpReceivePipeline> pipeline_;
     std::unique_ptr<output_contract::LiveVideoOutputBackend> output_;
+    std::unique_ptr<ReceiverRtcpWorker> rtcp_;
     bool input_open_ = false;
     bool output_open_ = false;
+    bool rtcp_started_ = false;
 
     mutable std::mutex mutex_;
     std::condition_variable state_changed_;
@@ -150,6 +165,7 @@ VideoReceiveStartResult DefaultVideoReceiveWorker::Impl::start() {
     stats_.input.reset();
     stats_.output.reset();
     stats_.pipeline = {};
+    stats_.rtcp.reset();
     session_started_at_.reset();
     last_output_at_.reset();
     last_issue_.reset();
@@ -235,6 +251,9 @@ VideoReceiveWorkerStats DefaultVideoReceiveWorker::Impl::stats() const noexcept 
         snapshot.session_duration =
             std::chrono::duration_cast<std::chrono::nanoseconds>(
                 Clock::now() - *session_started_at_);
+    }
+    if (rtcp_) {
+        snapshot.rtcp = rtcp_->stats();
     }
     return snapshot;
 }
@@ -350,6 +369,19 @@ bool DefaultVideoReceiveWorker::Impl::start_session(
     }
     input_open_ = true;
 
+    if (rtcp_) {
+        auto opened_rtcp = rtcp_->start();
+        if (!opened_rtcp) {
+            auto issue = make_rtcp_issue(
+                VideoReceiveWorkerOperation::OpenRtcp,
+                std::move(opened_rtcp.error()));
+            close_session(output_contract::LiveVideoOutputCloseMode::Abort);
+            finish_start_failure(std::move(issue));
+            return false;
+        }
+        rtcp_started_ = true;
+    }
+
     if (stop_token.stop_requested()) {
         close_session(output_contract::LiveVideoOutputCloseMode::Abort);
         finish_start_failure(make_issue(
@@ -368,6 +400,16 @@ bool DefaultVideoReceiveWorker::Impl::start_session(
 
 bool DefaultVideoReceiveWorker::Impl::process_one_observation(
     const std::stop_token stop_token) {
+    if (rtcp_ && rtcp_->state() == ReceiverRtcpWorkerState::Failed) {
+        const auto rtcp_stats = rtcp_->stats();
+        fail_running_session(make_rtcp_issue(
+            VideoReceiveWorkerOperation::RunRtcp,
+            rtcp_stats.last_issue.value_or(ReceiverRtcpWorkerIssue{
+                ReceiverRtcpWorkerOperation::Internal,
+                std::nullopt,
+                "receiver RTCP worker failed without an issue"})));
+        return false;
+    }
     input_contract::DatagramSourceReceiveResult received;
     try {
         received = input_->receive_for(config_.receive_poll_interval);
@@ -577,6 +619,10 @@ void DefaultVideoReceiveWorker::Impl::close_session(
     const output_contract::LiveVideoOutputCloseMode mode) noexcept {
     finish_session_timing();
     publish_pipeline_stats();
+    if (rtcp_started_ && rtcp_) {
+        rtcp_->stop();
+        rtcp_started_ = false;
+    }
     if (input_open_) {
         input_->close();
         input_open_ = false;
@@ -602,9 +648,11 @@ DefaultVideoReceiveWorker::DefaultVideoReceiveWorker(
     DefaultVideoReceiveWorkerConfig config,
     std::unique_ptr<contracts::network::DatagramSourceBackend> input,
     std::unique_ptr<H264RtpReceivePipeline> pipeline,
-    std::unique_ptr<contracts::output::LiveVideoOutputBackend> output)
+    std::unique_ptr<contracts::output::LiveVideoOutputBackend> output,
+    std::unique_ptr<ReceiverRtcpWorker> rtcp)
     : impl_{std::make_unique<Impl>(std::move(config), std::move(input),
-                                  std::move(pipeline), std::move(output))} {}
+                                  std::move(pipeline), std::move(output),
+                                  std::move(rtcp))} {}
 
 DefaultVideoReceiveWorker::~DefaultVideoReceiveWorker() = default;
 

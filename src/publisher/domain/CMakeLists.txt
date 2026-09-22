@@ -3,6 +3,8 @@ find_package(Threads REQUIRED)
 add_library(semilive_publisher_domain STATIC
     src/resource/captured_video_frame_store/captured_video_frame_store.cpp
     src/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue.cpp
+    src/rtp/rtp_sender_state.cpp
+    src/rtcp/default_publisher_rtcp_worker.cpp
     src/timing/frame_scheduler.cpp
     src/timing/session_timeline.cpp
     src/worker/video_capture_worker/default_video_capture_worker.cpp
@@ -20,6 +22,7 @@ target_link_libraries(semilive_publisher_domain
     PUBLIC
         SemiLive::PublisherContracts
         SemiLive::PublisherModel
+        SemiLive::CommonRtcp
     PRIVATE
         Threads::Threads
 )

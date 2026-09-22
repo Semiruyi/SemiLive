@@ -3,6 +3,7 @@
 #include <semilive/receiver/contracts/network/datagram_source_backend.hpp>
 #include <semilive/receiver/contracts/output/live_video_output_backend.hpp>
 #include <semilive/receiver/domain/pipeline/h264_rtp_receive_pipeline.hpp>
+#include <semilive/receiver/domain/rtcp/receiver_rtcp_worker.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -25,9 +26,11 @@ enum class VideoReceiveWorkerOperation : std::uint8_t {
     StartSession,
     OpenOutput,
     OpenInput,
+    OpenRtcp,
     ReceiveInput,
     SubmitOutput,
     RunSession,
+    RunRtcp,
     StopSession,
     Internal,
 };
@@ -37,6 +40,7 @@ struct VideoReceiveWorkerIssue {
         VideoReceiveWorkerOperation::Internal;
     std::optional<contracts::network::DatagramSourceIssue> input_issue;
     std::optional<contracts::output::LiveVideoOutputIssue> output_issue;
+    std::optional<ReceiverRtcpWorkerIssue> rtcp_issue;
     std::string message;
 };
 
@@ -71,6 +75,7 @@ struct VideoReceiveWorkerStats {
     std::optional<contracts::network::DatagramSourceInfo> input;
     std::optional<contracts::output::LiveVideoOutputInfo> output;
     H264RtpReceivePipelineStats pipeline;
+    std::optional<ReceiverRtcpWorkerStats> rtcp;
 };
 
 enum class VideoReceiveWaitStatus : std::uint8_t {

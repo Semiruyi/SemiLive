@@ -6,9 +6,11 @@ add_library(semilive_receiver_domain STATIC
     src/h264/h264_rtp_depacketizer.cpp
     src/pipeline/h264_rtp_receive_pipeline.cpp
     src/rtp/rtp_parser.cpp
+    src/rtp/rtp_reception_statistics.cpp
     src/rtp/rtp_reorder_buffer.cpp
     src/rtp/rtp_session_filter.cpp
     src/rtp/rtp_timestamp_mapper.cpp
+    src/rtcp/default_receiver_rtcp_worker.cpp
     src/worker/default_video_receive_worker.cpp
 )
 
@@ -22,6 +24,7 @@ target_link_libraries(semilive_receiver_domain
     PUBLIC
         SemiLive::ReceiverContracts
         SemiLive::ReceiverModel
+        SemiLive::CommonRtcp
     PRIVATE
         Threads::Threads
 )

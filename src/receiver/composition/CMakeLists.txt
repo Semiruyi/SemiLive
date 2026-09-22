@@ -16,5 +16,6 @@ target_link_libraries(semilive_receiver_composition
     PRIVATE
         SemiLive::ReceiverDomain
         SemiLive::ReceiverInfrastructure
+        SemiLive::CommonRtcpUdp
 )
 semilive_enable_warnings(semilive_receiver_composition)
