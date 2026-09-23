@@ -87,6 +87,25 @@ void write_optional_integer(std::ostream& output,
     output << *value;
 }
 
+void write_optional_byte(std::ostream& output,
+                         const std::optional<std::uint8_t>& value) {
+    if (!value) {
+        output << "null";
+        return;
+    }
+    output << static_cast<unsigned int>(*value);
+}
+
+void write_optional_fraction_lost_percent(
+    std::ostream& output,
+    const std::optional<std::uint8_t>& value) {
+    if (!value) {
+        output << "null";
+        return;
+    }
+    output << (100.0 * static_cast<double>(*value) / 256.0);
+}
+
 [[nodiscard]] std::string_view state_name(
     const domain::VideoReceiveWorkerState state) noexcept {
     using State = domain::VideoReceiveWorkerState;
@@ -116,6 +135,49 @@ void write_optional_integer(std::ostream& output,
     const composition::ReceiverVideoOutputMode mode) noexcept {
     return mode == composition::ReceiverVideoOutputMode::Ffplay ? "ffplay"
                                                                 : "file";
+}
+
+[[nodiscard]] std::string_view rtcp_state_name(
+    const domain::ReceiverRtcpWorkerState state) noexcept {
+    using State = domain::ReceiverRtcpWorkerState;
+    switch (state) {
+    case State::Idle:
+        return "idle";
+    case State::Running:
+        return "running";
+    case State::Failed:
+        return "failed";
+    }
+    return "unknown";
+}
+
+void write_rtcp_config(std::ostream& output,
+                       const composition::ReceiverConfig& config) {
+    output << "    \"rtcp\": ";
+    if (!config.rtcp) {
+        output << "null,\n";
+        return;
+    }
+
+    const auto& rtcp = *config.rtcp;
+    output << "{\n"
+              "      \"bind_address\": ";
+    write_json_string(output, rtcp.transport.bind_address);
+    output << ",\n"
+              "      \"bind_port\": "
+           << rtcp.transport.bind_port << ",\n"
+              "      \"peer_address\": ";
+    write_json_string(output, rtcp.transport.peer_address);
+    output << ",\n"
+              "      \"peer_port\": "
+           << rtcp.transport.peer_port << ",\n"
+              "      \"maximum_datagram_bytes\": "
+           << rtcp.transport.maximum_datagram_bytes << ",\n"
+              "      \"receive_buffer_bytes\": "
+           << rtcp.transport.receive_buffer_bytes << ",\n"
+              "      \"report_interval_ms\": "
+           << rtcp.report_interval.count() << "\n"
+              "    },\n";
 }
 
 void write_config(std::ostream& output,
@@ -168,8 +230,9 @@ void write_config(std::ostream& output,
            << config.ffplay.maximum_buffered_access_units << ",\n"
               "      \"ffplay_maximum_buffered_bytes\": "
            << config.ffplay.maximum_buffered_bytes << "\n"
-              "    },\n"
-              "    \"receive_poll_interval_ms\": "
+              "    },\n";
+    write_rtcp_config(output, config);
+    output << "    \"receive_poll_interval_ms\": "
            << config.receive_poll_interval.count() << ",\n"
               "    \"output_stall_threshold_ms\": "
            << config.output_stall_threshold.count() << "\n"
@@ -290,6 +353,71 @@ void write_rtp(std::ostream& output, const Stats& stats) {
               "      \"peak_buffered_packets\": "
            << reorder.peak_buffered_packets << "\n"
               "    }\n"
+              "  },\n";
+}
+
+void write_rtcp(std::ostream& output, const Stats& stats) {
+    output << "  \"rtcp\": ";
+    if (!stats.rtcp) {
+        output << "null,\n";
+        return;
+    }
+
+    const auto& rtcp = *stats.rtcp;
+    output << "{\n"
+              "    \"state\": ";
+    write_json_string(output, rtcp_state_name(rtcp.state));
+    output << ",\n"
+              "    \"bound_address\": ";
+    if (rtcp.transport) {
+        write_json_string(output, rtcp.transport->bound_address);
+    } else {
+        output << "null";
+    }
+    output << ",\n"
+              "    \"bound_port\": ";
+    if (rtcp.transport) {
+        output << rtcp.transport->bound_port;
+    } else {
+        output << "null";
+    }
+    output << ",\n"
+              "    \"actual_receive_buffer_bytes\": ";
+    if (rtcp.transport) {
+        output << rtcp.transport->receive_buffer_bytes;
+    } else {
+        output << "null";
+    }
+    output << ",\n"
+              "    \"sender_reports_received\": "
+           << rtcp.sender_reports_received << ",\n"
+              "    \"receiver_reports_sent\": "
+           << rtcp.receiver_reports_sent << ",\n"
+              "    \"invalid_packets\": "
+           << rtcp.invalid_packets << ",\n"
+              "    \"ignored_sender_reports\": "
+           << rtcp.ignored_sender_reports << ",\n"
+              "    \"current_fraction_lost\": ";
+    write_optional_byte(output, rtcp.current_fraction_lost);
+    output << ",\n"
+              "    \"current_fraction_lost_percent\": ";
+    write_optional_fraction_lost_percent(output, rtcp.current_fraction_lost);
+    output << ",\n"
+              "    \"cumulative_lost\": ";
+    write_optional_integer(output, rtcp.cumulative_lost);
+    output << ",\n"
+              "    \"extended_highest_sequence\": ";
+    write_optional_integer(output, rtcp.extended_highest_sequence);
+    output << ",\n"
+              "    \"interarrival_jitter_rtp_ticks\": ";
+    write_optional_integer(output, rtcp.interarrival_jitter);
+    output << ",\n"
+              "    \"last_sender_report\": ";
+    write_optional_integer(output, rtcp.last_sender_report);
+    output << ",\n"
+              "    \"delay_since_last_sender_report\": ";
+    write_optional_integer(output, rtcp.delay_since_last_sender_report);
+    output << "\n"
               "  },\n";
 }
 
@@ -422,13 +550,14 @@ std::string render_receiver_session_report_json(
     std::ostringstream output;
     output.imbue(std::locale::classic());
     output << "{\n"
-              "  \"schema_version\": 2,\n"
+              "  \"schema_version\": 3,\n"
               "  \"application\": \"semilive_receiver\",\n"
               "  \"application_version\": \"0.1.0-dev\",\n";
     write_config(output, report.config);
     write_session(output, report.stats, report.run_succeeded);
     write_input(output, report.stats);
     write_rtp(output, report.stats);
+    write_rtcp(output, report.stats);
     write_h264(output, report.stats);
     write_output(output, report.stats);
     output << "}\n";

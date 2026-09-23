@@ -56,6 +56,11 @@ private:
     report.config.input.bind_port = 5004;
     report.config.pipeline.session.ssrc = 0x1234'5678U;
     report.config.h264_output_path = "video\"baseline.h264";
+    report.config.rtcp.emplace();
+    report.config.rtcp->transport.bind_address = "127.0.0.1";
+    report.config.rtcp->transport.bind_port = 5007;
+    report.config.rtcp->transport.peer_address = "127.0.0.1";
+    report.config.rtcp->transport.peer_port = 5005;
     report.stats.session_id = 7;
     report.stats.session_duration = 1'234ms;
     report.stats.first_output_delay = 45ms;
@@ -76,6 +81,19 @@ private:
     report.stats.pipeline.recovery.recovery_wait_maximum_including_active = 300ms;
     report.stats.submitted_access_units = 80;
     report.stats.submitted_bytes = 12'345;
+    report.stats.rtcp.emplace();
+    report.stats.rtcp->state =
+        semilive::receiver::domain::ReceiverRtcpWorkerState::Idle;
+    report.stats.rtcp->transport = {
+        "127.0.0.1", 5007, 1'500, 262'144};
+    report.stats.rtcp->sender_reports_received = 12;
+    report.stats.rtcp->receiver_reports_sent = 11;
+    report.stats.rtcp->current_fraction_lost = 13;
+    report.stats.rtcp->cumulative_lost = 7;
+    report.stats.rtcp->extended_highest_sequence = 65'540;
+    report.stats.rtcp->interarrival_jitter = 900;
+    report.stats.rtcp->last_sender_report = 0x1234'5678U;
+    report.stats.rtcp->delay_since_last_sender_report = 65'536;
     return report;
 }
 
@@ -84,7 +102,7 @@ void renders_machine_readable_baseline_fields() {
         reporting::render_receiver_session_report_json(sample_report());
     require(json.starts_with("{\n") && json.ends_with("}\n"),
             "report must be a complete JSON object");
-    require(json.find("\"schema_version\": 2") != std::string::npos &&
+    require(json.find("\"schema_version\": 3") != std::string::npos &&
                 json.find("\"mode\": \"file\"") != std::string::npos &&
                 json.find("\"run_succeeded\": true") !=
                     std::string::npos &&
@@ -109,8 +127,34 @@ void renders_machine_readable_baseline_fields() {
                 json.find("\"wait_total_including_active_ms\": 425") !=
                     std::string::npos,
             "report must expose baseline transport and recovery metrics");
+    require(json.find("\"bind_port\": 5007") != std::string::npos &&
+                json.find("\"peer_port\": 5005") != std::string::npos &&
+                json.find("\"sender_reports_received\": 12") !=
+                    std::string::npos &&
+                json.find("\"receiver_reports_sent\": 11") !=
+                    std::string::npos &&
+                json.find("\"current_fraction_lost\": 13") !=
+                    std::string::npos &&
+                json.find("\"current_fraction_lost_percent\": 5.07812") !=
+                    std::string::npos &&
+                json.find("\"cumulative_lost\": 7") !=
+                    std::string::npos &&
+                json.find("\"extended_highest_sequence\": 65540") !=
+                    std::string::npos &&
+                json.find("\"interarrival_jitter_rtp_ticks\": 900") !=
+                    std::string::npos,
+            "receiver report must expose configured and observed RTCP data");
     require(json.find("video\\\"baseline.h264") != std::string::npos,
             "report must JSON-escape configured paths");
+}
+
+void renders_null_rtcp_when_disabled() {
+    reporting::ReceiverSessionReport report;
+    const auto json =
+        reporting::render_receiver_session_report_json(report);
+    require(json.find("    \"rtcp\": null") != std::string::npos &&
+                json.find("  \"rtcp\": null") != std::string::npos,
+            "receiver report must distinguish disabled RTCP");
 }
 
 void writes_the_rendered_report_and_reports_open_failures() {
@@ -141,6 +185,7 @@ void writes_the_rendered_report_and_reports_open_failures() {
 int main() {
     try {
         renders_machine_readable_baseline_fields();
+        renders_null_rtcp_when_disabled();
         writes_the_rendered_report_and_reports_open_failures();
     } catch (const std::exception& error) {
         std::cerr << "receiver session report test failed: "

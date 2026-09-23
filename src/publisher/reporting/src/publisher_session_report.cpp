@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <fstream>
 #include <locale>
+#include <optional>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -55,6 +56,45 @@ std::int64_t milliseconds(const std::chrono::nanoseconds value) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(value).count();
 }
 
+template <typename Integer>
+void write_optional_integer(std::ostream& output,
+                            const std::optional<Integer>& value) {
+    if (!value) {
+        output << "null";
+        return;
+    }
+    output << *value;
+}
+
+void write_optional_byte(std::ostream& output,
+                         const std::optional<std::uint8_t>& value) {
+    if (!value) {
+        output << "null";
+        return;
+    }
+    output << static_cast<unsigned int>(*value);
+}
+
+void write_optional_fraction_lost_percent(
+    std::ostream& output,
+    const std::optional<std::uint8_t>& value) {
+    if (!value) {
+        output << "null";
+        return;
+    }
+    output << (100.0 * static_cast<double>(*value) / 256.0);
+}
+
+void write_optional_duration(
+    std::ostream& output,
+    const std::optional<std::chrono::nanoseconds>& value) {
+    if (!value) {
+        output << "null";
+        return;
+    }
+    output << milliseconds(*value);
+}
+
 std::string_view state_name(
     const application::PublisherControllerState state) noexcept {
     using State = application::PublisherControllerState;
@@ -85,8 +125,114 @@ std::string_view selection_name(
     return "unknown";
 }
 
+std::string_view rtcp_state_name(
+    const domain::PublisherRtcpWorkerState state) noexcept {
+    using State = domain::PublisherRtcpWorkerState;
+    switch (state) {
+    case State::Idle:
+        return "idle";
+    case State::Running:
+        return "running";
+    case State::Failed:
+        return "failed";
+    }
+    return "unknown";
+}
+
 std::string path_text(const std::filesystem::path& path) {
     return path.generic_string();
+}
+
+void write_rtcp_config(std::ostream& output,
+                       const composition::PublisherConfig& config) {
+    output << "    \"rtcp\": ";
+    if (!config.rtcp) {
+        output << "null\n";
+        return;
+    }
+
+    const auto& rtcp = *config.rtcp;
+    output << "{\n"
+              "      \"bind_address\": ";
+    write_json_string(output, rtcp.transport.bind_address);
+    output << ",\n"
+              "      \"bind_port\": "
+           << rtcp.transport.bind_port << ",\n"
+              "      \"peer_address\": ";
+    write_json_string(output, rtcp.transport.peer_address);
+    output << ",\n"
+              "      \"peer_port\": "
+           << rtcp.transport.peer_port << ",\n"
+              "      \"maximum_datagram_bytes\": "
+           << rtcp.transport.maximum_datagram_bytes << ",\n"
+              "      \"receive_buffer_bytes\": "
+           << rtcp.transport.receive_buffer_bytes << ",\n"
+              "      \"report_interval_ms\": "
+           << rtcp.report_interval.count() << "\n"
+              "    }\n";
+}
+
+void write_rtcp_stats(std::ostream& output,
+                      const application::PublisherControllerStats& stats) {
+    output << "  \"rtcp\": ";
+    if (!stats.rtcp) {
+        output << "null\n";
+        return;
+    }
+
+    const auto& rtcp = *stats.rtcp;
+    output << "{\n"
+              "    \"state\": ";
+    write_json_string(output, rtcp_state_name(rtcp.state));
+    output << ",\n"
+              "    \"bound_address\": ";
+    if (rtcp.transport) {
+        write_json_string(output, rtcp.transport->bound_address);
+    } else {
+        output << "null";
+    }
+    output << ",\n"
+              "    \"bound_port\": ";
+    if (rtcp.transport) {
+        output << rtcp.transport->bound_port;
+    } else {
+        output << "null";
+    }
+    output << ",\n"
+              "    \"actual_receive_buffer_bytes\": ";
+    if (rtcp.transport) {
+        output << rtcp.transport->receive_buffer_bytes;
+    } else {
+        output << "null";
+    }
+    output << ",\n"
+              "    \"sender_reports_sent\": "
+           << rtcp.sender_reports_sent << ",\n"
+              "    \"receiver_reports_received\": "
+           << rtcp.receiver_reports_received << ",\n"
+              "    \"invalid_packets\": "
+           << rtcp.invalid_packets << ",\n"
+              "    \"ignored_report_blocks\": "
+           << rtcp.ignored_report_blocks << ",\n"
+              "    \"rtt_samples\": "
+           << rtcp.rtt_samples << ",\n"
+              "    \"current_rtt_ms\": ";
+    write_optional_duration(output, rtcp.current_rtt);
+    output << ",\n"
+              "    \"reported_fraction_lost\": ";
+    write_optional_byte(output, rtcp.reported_fraction_lost);
+    output << ",\n"
+              "    \"reported_fraction_lost_percent\": ";
+    write_optional_fraction_lost_percent(
+        output, rtcp.reported_fraction_lost);
+    output << ",\n"
+              "    \"reported_cumulative_lost\": ";
+    write_optional_integer(output, rtcp.reported_cumulative_lost);
+    output << ",\n"
+              "    \"reported_jitter_rtp_ticks\": ";
+    write_optional_integer(output, rtcp.reported_jitter);
+    output << "\n"
+              "  }\n";
 }
 
 }  // namespace
@@ -101,7 +247,7 @@ std::string render_publisher_session_report_json(
     std::ostringstream output;
     output.imbue(std::locale::classic());
     output << "{\n"
-              "  \"schema_version\": 1,\n"
+              "  \"schema_version\": 2,\n"
               "  \"application\": \"semilive_publisher\",\n"
               "  \"application_version\": \"0.1.0-dev\",\n"
               "  \"config\": {\n"
@@ -140,8 +286,9 @@ std::string render_publisher_session_report_json(
            << static_cast<unsigned int>(rtp.payload_type) << ",\n"
               "      \"maximum_datagram_bytes\": "
            << rtp.max_datagram_bytes << "\n"
-              "    }\n"
-              "  },\n"
+              "    },\n";
+    write_rtcp_config(output, config);
+    output << "  },\n"
               "  \"session\": {\n"
               "    \"id\": "
            << stats.session_id << ",\n"
@@ -190,8 +337,9 @@ std::string render_publisher_session_report_json(
            << stats.output.consumed_access_units << ",\n"
               "    \"input_bytes\": "
            << stats.output.input_bytes << "\n"
-              "  }\n"
-              "}\n";
+              "  },\n";
+    write_rtcp_stats(output, stats);
+    output << "}\n";
     return std::move(output).str();
 }
 

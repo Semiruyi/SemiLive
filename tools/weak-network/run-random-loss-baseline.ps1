@@ -10,6 +10,13 @@ param(
     [int]$RelayPort = 5004,
     [ValidateRange(1, 65535)]
     [int]$ReceiverPort = 5006,
+    [switch]$EnableRtcp,
+    [ValidateRange(1, 65535)]
+    [int]$PublisherRtcpPort = 5005,
+    [ValidateRange(1, 65535)]
+    [int]$ReceiverRtcpPort = 5007,
+    [ValidateRange(100, 60000)]
+    [int]$RtcpReportIntervalMilliseconds = 1000,
     [ValidateRange(0, 60000)]
     [int]$StartupDelayMilliseconds = 750,
     [string]$Display = "primary",
@@ -62,6 +69,22 @@ function Get-RequiredJson {
     return Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 
+function Get-OptionalProperty {
+    param(
+        [object]$Object,
+        [string]$Name
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+
 function Wait-ProcessAndGetExitCode {
     param([Diagnostics.Process]$Process)
 
@@ -106,7 +129,10 @@ function Get-ErrorTail {
 }
 
 function Test-CompleteRun {
-    param([string]$Path)
+    param(
+        [string]$Path,
+        [bool]$RequireRtcp = $false
+    )
 
     foreach ($name in @("publisher.json", "relay.json", "receiver.json", "run.json")) {
         if (-not (Test-Path -LiteralPath (Join-Path $Path $name) -PathType Leaf)) {
@@ -118,9 +144,18 @@ function Test-CompleteRun {
         $relay = Get-RequiredJson (Join-Path $Path "relay.json")
         $receiver = Get-RequiredJson (Join-Path $Path "receiver.json")
         $run = Get-RequiredJson (Join-Path $Path "run.json")
-        return [bool]$publisher.session.run_succeeded -and
+        $succeeded = [bool]$publisher.session.run_succeeded -and
             [bool]$relay.session.run_succeeded -and
             [bool]$receiver.session.run_succeeded
+        if (-not $succeeded) {
+            return $false
+        }
+        if ($RequireRtcp -and
+            ($null -eq (Get-OptionalProperty $publisher "rtcp") -or
+             $null -eq (Get-OptionalProperty $receiver "rtcp"))) {
+            return $false
+        }
+        return $true
     } catch {
         return $false
     }
@@ -186,6 +221,28 @@ function Get-RunRows {
             100.0 * [double]$recovery.episodes_completed /
                 [double]$recovery.episodes_started
         } else { $null }
+        $publisherRtcp = Get-OptionalProperty $publisher "rtcp"
+        $receiverRtcp = Get-OptionalProperty $receiver "rtcp"
+        $publisherFractionLostPercentValue = Get-OptionalProperty `
+            $publisherRtcp "reported_fraction_lost_percent"
+        $publisherFractionLostRaw = Get-OptionalProperty `
+            $publisherRtcp "reported_fraction_lost"
+        $publisherFractionLostPercent = if ($null -ne
+            $publisherFractionLostPercentValue) {
+            [double]$publisherFractionLostPercentValue
+        } elseif ($null -ne $publisherFractionLostRaw) {
+            100.0 * [double]$publisherFractionLostRaw / 256.0
+        } else { $null }
+        $receiverFractionLostPercentValue = Get-OptionalProperty `
+            $receiverRtcp "current_fraction_lost_percent"
+        $receiverFractionLostRaw = Get-OptionalProperty `
+            $receiverRtcp "current_fraction_lost"
+        $receiverFractionLostPercent = if ($null -ne
+            $receiverFractionLostPercentValue) {
+            [double]$receiverFractionLostPercentValue
+        } elseif ($null -ne $receiverFractionLostRaw) {
+            100.0 * [double]$receiverFractionLostRaw / 256.0
+        } else { $null }
 
         $rows += [PSCustomObject][ordered]@{
             run = $runDirectory.Name
@@ -197,6 +254,13 @@ function Get-RunRows {
             receiver_exit_code = $runConfig.exit_codes.receiver
             publisher_access_units = $publisherAccessUnits
             publisher_datagrams = [UInt64]$publisher.rtp.media_datagrams
+            publisher_rtcp_sender_reports_sent = if ($null -ne $publisherRtcp) { [UInt64]$publisherRtcp.sender_reports_sent } else { $null }
+            publisher_rtcp_receiver_reports_received = if ($null -ne $publisherRtcp) { [UInt64]$publisherRtcp.receiver_reports_received } else { $null }
+            publisher_rtcp_rtt_samples = if ($null -ne $publisherRtcp) { [UInt64]$publisherRtcp.rtt_samples } else { $null }
+            publisher_rtcp_current_rtt_ms = if ($null -ne $publisherRtcp) { $publisherRtcp.current_rtt_ms } else { $null }
+            publisher_rtcp_reported_fraction_lost_percent = $publisherFractionLostPercent
+            publisher_rtcp_reported_cumulative_lost = if ($null -ne $publisherRtcp) { $publisherRtcp.reported_cumulative_lost } else { $null }
+            publisher_rtcp_reported_jitter_rtp_ticks = if ($null -ne $publisherRtcp) { $publisherRtcp.reported_jitter_rtp_ticks } else { $null }
             relay_received_datagrams = [UInt64]$traffic.received_datagrams
             relay_forwarded_datagrams = [UInt64]$traffic.forwarded_datagrams
             relay_dropped_datagrams = [UInt64]$traffic.dropped_datagrams
@@ -204,6 +268,11 @@ function Get-RunRows {
             receiver_received_packets = [UInt64]$reorder.received_packets
             receiver_confirmed_lost_packets = [UInt64]$reorder.confirmed_lost_packets
             receiver_confirmed_loss_percent = $receiverLossPercent
+            receiver_rtcp_sender_reports_received = if ($null -ne $receiverRtcp) { [UInt64]$receiverRtcp.sender_reports_received } else { $null }
+            receiver_rtcp_receiver_reports_sent = if ($null -ne $receiverRtcp) { [UInt64]$receiverRtcp.receiver_reports_sent } else { $null }
+            receiver_rtcp_fraction_lost_percent = $receiverFractionLostPercent
+            receiver_rtcp_cumulative_lost = if ($null -ne $receiverRtcp) { $receiverRtcp.cumulative_lost } else { $null }
+            receiver_rtcp_interarrival_jitter_rtp_ticks = if ($null -ne $receiverRtcp) { $receiverRtcp.interarrival_jitter_rtp_ticks } else { $null }
             discarded_access_units = [UInt64]$assembler.discarded_access_units
             dropped_while_waiting = [UInt64]$recovery.dropped_while_waiting
             recovery_episodes_started = [UInt64]$recovery.episodes_started
@@ -303,7 +372,9 @@ if ($Resume) {
         throw "OutputDirectory is not a random-loss baseline experiment"
     }
     foreach ($name in @("BuildDirectory", "DurationSeconds", "LossPercents",
-                         "Seeds", "RelayPort", "ReceiverPort",
+                         "Seeds", "RelayPort", "ReceiverPort", "EnableRtcp",
+                         "PublisherRtcpPort", "ReceiverRtcpPort",
+                         "RtcpReportIntervalMilliseconds",
                          "StartupDelayMilliseconds", "Display", "KeepMedia")) {
         if ($PSBoundParameters.ContainsKey($name)) {
             throw "Resume reloads $name from config.json; do not specify it"
@@ -315,6 +386,18 @@ if ($Resume) {
     $Seeds = @($existingConfig.seeds | ForEach-Object { [UInt64]$_ })
     $RelayPort = [int]$existingConfig.relay_port
     $ReceiverPort = [int]$existingConfig.receiver_port
+    $configuredEnableRtcp = Get-OptionalProperty $existingConfig "enable_rtcp"
+    $EnableRtcp = if ($null -ne $configuredEnableRtcp) {
+        [bool]$configuredEnableRtcp
+    } else {
+        $false
+    }
+    if ($EnableRtcp) {
+        $PublisherRtcpPort = [int]$existingConfig.publisher_rtcp_port
+        $ReceiverRtcpPort = [int]$existingConfig.receiver_rtcp_port
+        $RtcpReportIntervalMilliseconds =
+            [int]$existingConfig.rtcp_report_interval_milliseconds
+    }
     $StartupDelayMilliseconds = [int]$existingConfig.startup_delay_milliseconds
     $Display = [string]$existingConfig.display
 }
@@ -336,6 +419,14 @@ if ($SummarizeOnly) {
 
 if ($RelayPort -eq $ReceiverPort) {
     throw "RelayPort and ReceiverPort must be different"
+}
+if ($EnableRtcp) {
+    $configuredPorts = @($RelayPort, $ReceiverPort, $PublisherRtcpPort,
+        $ReceiverRtcpPort)
+    if (($configuredPorts | Select-Object -Unique).Count -ne
+        $configuredPorts.Count) {
+        throw "RTP and RTCP ports must all be different when RTCP is enabled"
+    }
 }
 if ($LossPercents.Count -eq 0 -or $Seeds.Count -eq 0) {
     throw "LossPercents and Seeds must each contain at least one value"
@@ -366,7 +457,7 @@ if ($Resume) {
     $rawDirectory = New-Item -ItemType Directory -Path (Join-Path $OutputDirectory "raw")
     $commit = (& git -C $repoRoot rev-parse HEAD 2>$null)
     $experimentConfig = [PSCustomObject][ordered]@{
-        schema_version = 1
+        schema_version = 2
         experiment = "random-loss-baseline"
         created_at = (Get-Date).ToUniversalTime().ToString("o")
         git_commit = if ($LASTEXITCODE -eq 0) { "$commit".Trim() } else { $null }
@@ -376,6 +467,10 @@ if ($Resume) {
         seeds = @($Seeds)
         relay_port = $RelayPort
         receiver_port = $ReceiverPort
+        enable_rtcp = [bool]$EnableRtcp
+        publisher_rtcp_port = $PublisherRtcpPort
+        receiver_rtcp_port = $ReceiverRtcpPort
+        rtcp_report_interval_milliseconds = $RtcpReportIntervalMilliseconds
         startup_delay_milliseconds = $StartupDelayMilliseconds
         display = $Display
         keep_media = $keepMediaFiles
@@ -395,7 +490,7 @@ foreach ($loss in $LossPercents) {
         $runName = "loss-$lossName-seed-$seed"
         $runPath = Join-Path $rawDirectory.FullName $runName
         if (Test-Path -LiteralPath $runPath -PathType Container) {
-            if (Test-CompleteRun $runPath) {
+            if (Test-CompleteRun $runPath ([bool]$EnableRtcp)) {
                 if (-not $keepMediaFiles) {
                     Remove-Item -LiteralPath (Join-Path $runPath "received.h264") `
                         -Force -ErrorAction SilentlyContinue
@@ -445,6 +540,22 @@ foreach ($loss in $LossPercents) {
             "--stats-json", "publisher.json",
             "--run-duration-seconds", "$DurationSeconds"
         )
+        if ($EnableRtcp) {
+            $receiverArgs += @(
+                "--rtcp-bind-address", "127.0.0.1",
+                "--rtcp-bind-port", "$ReceiverRtcpPort",
+                "--rtcp-peer-address", "127.0.0.1",
+                "--rtcp-peer-port", "$PublisherRtcpPort",
+                "--rtcp-report-interval-ms", "$RtcpReportIntervalMilliseconds"
+            )
+            $publisherArgs += @(
+                "--rtcp-bind-address", "127.0.0.1",
+                "--rtcp-bind-port", "$PublisherRtcpPort",
+                "--rtcp-peer-address", "127.0.0.1",
+                "--rtcp-peer-port", "$ReceiverRtcpPort",
+                "--rtcp-report-interval-ms", "$RtcpReportIntervalMilliseconds"
+            )
+        }
 
         $receiverProcess = $null
         $relayProcess = $null
@@ -530,6 +641,10 @@ foreach ($loss in $LossPercents) {
             }
             $runConfig | ConvertTo-Json -Depth 6 |
                 Set-Content -LiteralPath (Join-Path $runDirectory.FullName "run.json") -Encoding UTF8
+
+            if (-not (Test-CompleteRun $runPath ([bool]$EnableRtcp))) {
+                throw "Completed process reports failed validation in $runName"
+            }
 
             if (-not $keepMediaFiles) {
                 Remove-Item -LiteralPath (Join-Path $runDirectory.FullName "received.h264") `

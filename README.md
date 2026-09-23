@@ -140,7 +140,8 @@ Receiver：
   --rtcp-bind-port 5007 \
   --rtcp-peer-address 127.0.0.1 \
   --rtcp-peer-port 5005 \
-  --output-mode ffplay
+  --output-mode ffplay \
+  --stats-json receiver-rtcp-stats.json
 ```
 
 再启动 Publisher：
@@ -152,11 +153,14 @@ Receiver：
   --rtcp-bind-address 0.0.0.0 \
   --rtcp-bind-port 5005 \
   --rtcp-peer-address 127.0.0.1 \
-  --rtcp-peer-port 5007
+  --rtcp-peer-port 5007 \
+  --stats-json publisher-rtcp-stats.json
 ```
 
 当前 RTCP 通道使用 SR/RR、Report Block 和 SDES CNAME，尚不发送 NACK、RTX 或 PLI。RTP 与
-RTCP 不做端口复用，也不使用隐含的“RTP 端口加一”规则。
+RTCP 不做端口复用，也不使用隐含的“RTP 端口加一”规则。启用 RTCP 后，Receiver JSON 会记录
+SR/RR 数量、fraction lost、累计丢包、扩展最高序列号和 interarrival jitter；Publisher JSON 会记录
+SR/RR 数量、Receiver 回报的丢包/jitter 和 RTT。未启用时报告中的 RTCP 配置与统计均为 `null`。
 
 Publisher 正常停止后会写出视频/GOP/码率和 RTP 配置，以及采集帧、编码 AU、关键帧、原始媒体
 RTP datagram 与字节数，作为 Receiver 丢包率和后续反馈/重传开销的发送端分母。
