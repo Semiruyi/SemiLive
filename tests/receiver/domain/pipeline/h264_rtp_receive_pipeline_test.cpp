@@ -1,4 +1,5 @@
 #include <semilive/receiver/domain/pipeline/h264_rtp_receive_pipeline.hpp>
+#include <semilive/receiver/domain/rtp/rtp_missing_tracker.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -7,6 +8,7 @@
 #include <exception>
 #include <initializer_list>
 #include <iostream>
+#include <memory>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -226,6 +228,45 @@ void external_output_drop_and_reset_have_session_scoped_behavior() {
             "reset must permit unrelated sequence and timestamp epochs");
 }
 
+void tracks_missing_packets_and_abandons_confirmed_gaps() {
+    auto missing_tracker = std::make_shared<domain::RtpMissingTracker>();
+    domain::H264RtpReceivePipeline pipeline{{}, {}, missing_tracker};
+
+    static_cast<void>(
+        pipeline.push(datagram(100, 1'000, true, {0x61}, 0ms)));
+    static_cast<void>(
+        pipeline.push(datagram(102, 3'000, true, {0x61}, 1ms)));
+    require(missing_tracker->stats().pending_packets == 1U &&
+                missing_tracker->take_due_nacks(Clock::time_point{11ms}) ==
+                    std::vector<std::uint16_t>{101U},
+            "pipeline did not expose its RTP sequence gap for NACK");
+
+    static_cast<void>(pipeline.poll(Clock::time_point{51ms}));
+    const auto confirmed = missing_tracker->stats();
+    require(confirmed.pending_packets == 0U &&
+                confirmed.abandoned_packets == 1U,
+            "confirmed reorder gap remained eligible for NACK");
+
+    pipeline.reset();
+    require(missing_tracker->stats().observed_packets == 0U,
+            "pipeline reset did not reset missing packet tracking");
+
+    auto deadline_tracker = std::make_shared<domain::RtpMissingTracker>();
+    domain::H264RtpReceivePipeline deadline_pipeline{
+        {}, {}, deadline_tracker};
+    static_cast<void>(deadline_pipeline.push(
+        datagram(200, 1'000, true, {0x61}, 0ms)));
+    static_cast<void>(deadline_pipeline.push(
+        datagram(202, 3'000, true, {0x61}, 1ms)));
+    static_cast<void>(deadline_pipeline.push(
+        datagram(201, 2'000, true, {0x61}, 51ms)));
+    const auto late = deadline_tracker->stats();
+    require(late.abandoned_packets == 1U &&
+                late.recovered_before_nack == 0U &&
+                late.recovered_after_nack == 0U,
+            "packet rejected at the reorder deadline was counted as recovered");
+}
+
 void validates_every_nested_stage_configuration() {
     domain::H264RtpReceivePipelineConfig invalid_config;
     invalid_config.reorder.maximum_buffered_packets = 0;
@@ -255,6 +296,7 @@ int main() {
         parse_and_session_rejections_do_not_contaminate_the_media_session();
         timestamp_failure_forces_random_access_recovery();
         external_output_drop_and_reset_have_session_scoped_behavior();
+        tracks_missing_packets_and_abandons_confirmed_gaps();
         validates_every_nested_stage_configuration();
     } catch (const std::exception& error) {
         std::cerr << "H.264 RTP receive pipeline test failed: "

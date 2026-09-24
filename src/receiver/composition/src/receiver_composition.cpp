@@ -3,6 +3,7 @@
 #include <semilive/receiver/application/default_receiver_controller.hpp>
 #include <semilive/receiver/domain/worker/default_video_receive_worker.hpp>
 #include <semilive/receiver/domain/rtcp/default_receiver_rtcp_worker.hpp>
+#include <semilive/receiver/domain/rtp/rtp_missing_tracker.hpp>
 #include <semilive/receiver/domain/rtp/rtp_reception_statistics.hpp>
 #include <semilive/receiver/infrastructure/network/udp_datagram_source_backend.hpp>
 #include <semilive/receiver/infrastructure/output/ffplay/ffplay_video_output_backend.hpp>
@@ -79,8 +80,13 @@ ReceiverCompositionResult ReceiverComposition::Impl::assemble() {
             std::make_unique<infra::network::UdpDatagramSourceBackend>();
         auto reception_statistics =
             std::make_shared<domain::RtpReceptionStatistics>();
+        std::shared_ptr<domain::RtpMissingTracker> missing_tracker;
+        if (config_.rtcp) {
+            missing_tracker =
+                std::make_shared<domain::RtpMissingTracker>();
+        }
         auto pipeline = std::make_unique<domain::H264RtpReceivePipeline>(
-            config_.pipeline, reception_statistics);
+            config_.pipeline, reception_statistics, missing_tracker);
         std::unique_ptr<contracts::output::LiveVideoOutputBackend> output;
         if (config_.output_mode == ReceiverVideoOutputMode::Ffplay) {
             infra::output::FfplayVideoOutputConfig ffplay_config;

@@ -18,6 +18,7 @@
 namespace semilive::receiver::domain {
 
 class RtpReceptionStatistics;
+class RtpMissingTracker;
 
 struct H264RtpReceivePipelineConfig {
     RtpSessionConfig session;
@@ -57,7 +58,8 @@ public:
 
     explicit H264RtpReceivePipeline(
         H264RtpReceivePipelineConfig config = {},
-        std::shared_ptr<RtpReceptionStatistics> reception_statistics = {});
+        std::shared_ptr<RtpReceptionStatistics> reception_statistics = {},
+        std::shared_ptr<RtpMissingTracker> missing_tracker = {});
     ~H264RtpReceivePipeline();
 
     H264RtpReceivePipeline(const H264RtpReceivePipeline&) = delete;

@@ -1,5 +1,6 @@
 #include <semilive/receiver/domain/pipeline/h264_rtp_receive_pipeline.hpp>
 
+#include <semilive/receiver/domain/rtp/rtp_missing_tracker.hpp>
 #include <semilive/receiver/domain/rtp/rtp_parser.hpp>
 #include <semilive/receiver/domain/rtp/rtp_reception_statistics.hpp>
 
@@ -49,13 +50,15 @@ validate_h264_rtp_receive_pipeline_config(
 
 struct H264RtpReceivePipeline::Impl {
     Impl(const H264RtpReceivePipelineConfig& config,
-         std::shared_ptr<RtpReceptionStatistics> reception_statistics)
+         std::shared_ptr<RtpReceptionStatistics> reception_statistics,
+         std::shared_ptr<RtpMissingTracker> missing_tracker)
         : session_filter_{config.session},
           reorder_{config.reorder},
           depacketizer_{config.depacketizer},
           assembler_{config.assembler},
           timestamp_mapper_{config.timestamp_mapper},
-          reception_statistics_{std::move(reception_statistics)} {}
+          reception_statistics_{std::move(reception_statistics)},
+          missing_tracker_{std::move(missing_tracker)} {}
 
     [[nodiscard]] H264RtpReceivePipelineOutputs push(
         model::UdpDatagram datagram);
@@ -67,6 +70,7 @@ struct H264RtpReceivePipeline::Impl {
     [[nodiscard]] H264RtpReceivePipelineOutputs process(
         RtpReorderEvents events,
         Clock::time_point observed_at);
+    void abandon_confirmed_gaps(const RtpReorderEvents& events) noexcept;
     void process_reorder_event(RtpReorderEvent event,
                                Clock::time_point observed_at,
                                H264RtpReceivePipelineOutputs& outputs);
@@ -87,6 +91,7 @@ struct H264RtpReceivePipeline::Impl {
     H264RecoveryGate recovery_gate_;
     RtpTimestampMapper timestamp_mapper_;
     std::shared_ptr<RtpReceptionStatistics> reception_statistics_;
+    std::shared_ptr<RtpMissingTracker> missing_tracker_;
     std::uint64_t received_datagrams_ = 0;
     std::uint64_t parse_failures_ = 0;
     std::uint64_t session_drops_ = 0;
@@ -115,12 +120,22 @@ H264RtpReceivePipelineOutputs H264RtpReceivePipeline::Impl::push(
             accepted->packet.ssrc(), accepted->packet.sequence_number(),
             accepted->packet.timestamp(), accepted->packet.received_at());
     }
-    return process(reorder_.push(std::move(accepted->packet)), observed_at);
+    const auto ssrc = accepted->packet.ssrc();
+    const auto sequence = accepted->packet.sequence_number();
+    const auto received_at = accepted->packet.received_at();
+    auto events = reorder_.push(std::move(accepted->packet));
+    abandon_confirmed_gaps(events);
+    if (missing_tracker_) {
+        missing_tracker_->observe(ssrc, sequence, received_at);
+    }
+    return process(std::move(events), observed_at);
 }
 
 H264RtpReceivePipelineOutputs H264RtpReceivePipeline::Impl::poll(
     const Clock::time_point now) {
-    return process(reorder_.poll(now), now);
+    auto events = reorder_.poll(now);
+    abandon_confirmed_gaps(events);
+    return process(std::move(events), now);
 }
 
 void H264RtpReceivePipeline::Impl::require_random_access(
@@ -155,11 +170,27 @@ void H264RtpReceivePipeline::Impl::reset() noexcept {
     if (reception_statistics_) {
         reception_statistics_->reset();
     }
+    if (missing_tracker_) {
+        missing_tracker_->reset();
+    }
     received_datagrams_ = 0;
     parse_failures_ = 0;
     session_drops_ = 0;
     timestamp_mapping_failures_ = 0;
     output_access_units_ = 0;
+}
+
+void H264RtpReceivePipeline::Impl::abandon_confirmed_gaps(
+    const RtpReorderEvents& events) noexcept {
+    if (!missing_tracker_) {
+        return;
+    }
+    for (const auto& event : events) {
+        if (const auto* gap = std::get_if<RtpSequenceGap>(&event)) {
+            missing_tracker_->abandon(gap->first_missing,
+                                      gap->missing_count);
+        }
+    }
 }
 
 H264RtpReceivePipelineOutputs H264RtpReceivePipeline::Impl::process(
@@ -216,12 +247,14 @@ void H264RtpReceivePipeline::Impl::process_assembler_event(
 
 H264RtpReceivePipeline::H264RtpReceivePipeline(
     H264RtpReceivePipelineConfig config,
-    std::shared_ptr<RtpReceptionStatistics> reception_statistics) {
+    std::shared_ptr<RtpReceptionStatistics> reception_statistics,
+    std::shared_ptr<RtpMissingTracker> missing_tracker) {
     const auto valid = validate_h264_rtp_receive_pipeline_config(config);
     if (!valid) {
         throw std::invalid_argument{valid.error()};
     }
-    impl_ = std::make_unique<Impl>(config, std::move(reception_statistics));
+    impl_ = std::make_unique<Impl>(config, std::move(reception_statistics),
+                                   std::move(missing_tracker));
 }
 
 H264RtpReceivePipeline::~H264RtpReceivePipeline() = default;

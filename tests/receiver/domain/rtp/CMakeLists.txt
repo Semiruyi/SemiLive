@@ -37,6 +37,19 @@ add_test(
     COMMAND semilive_receiver_rtp_reorder_buffer_test
 )
 
+add_executable(semilive_receiver_rtp_missing_tracker_test
+    rtp_missing_tracker_test.cpp
+)
+target_link_libraries(semilive_receiver_rtp_missing_tracker_test PRIVATE
+    SemiLive::ReceiverDomain
+)
+semilive_enable_warnings(semilive_receiver_rtp_missing_tracker_test)
+
+add_test(
+    NAME semilive_receiver_rtp_missing_tracker
+    COMMAND semilive_receiver_rtp_missing_tracker_test
+)
+
 add_executable(semilive_receiver_rtp_timestamp_mapper_test
     rtp_timestamp_mapper_test.cpp
 )
