@@ -127,6 +127,46 @@ void skips_unknown_packet_types_without_losing_boundaries() {
             "packet after unknown RTCP data was not parsed");
 }
 
+void serializes_and_parses_generic_nack_network_bytes() {
+    const rtcp::GenericNack nack{
+        0x1122'3344U,
+        0x5566'7788U,
+        {{1'000U, 0x0005U}, {2'000U, 0x8000U}},
+    };
+    const auto serialized = rtcp::serialize_compound_packet({{nack}});
+    require(serialized.has_value(), "Generic NACK did not serialize");
+    const auto expected = bytes({
+        0x81, 0xcd, 0x00, 0x04,
+        0x11, 0x22, 0x33, 0x44,
+        0x55, 0x66, 0x77, 0x88,
+        0x03, 0xe8, 0x00, 0x05,
+        0x07, 0xd0, 0x80, 0x00,
+    });
+    require(*serialized == expected,
+            "Generic NACK network representation is incorrect");
+
+    const auto parsed = rtcp::parse_compound_packet(expected);
+    require(parsed.has_value() && parsed->packets.size() == 1,
+            "Generic NACK did not parse");
+    const auto* parsed_nack =
+        std::get_if<rtcp::GenericNack>(&parsed->packets.front());
+    require(parsed_nack != nullptr && *parsed_nack == nack,
+            "Generic NACK fields were not preserved");
+}
+
+void packs_generic_nack_sequences_across_wraparound() {
+    const std::vector<std::uint16_t> lost{
+        65'534U, 65'535U, 0U, 2U, 2U, 20U,
+    };
+    const auto blocks = rtcp::pack_generic_nack_blocks(lost);
+    require(blocks == std::vector<rtcp::GenericNackBlock>{
+                          {65'534U, 0x000bU}, {20U, 0U}},
+            "lost sequences were not packed into PID/BLP blocks");
+    require(rtcp::expand_generic_nack_blocks(blocks) ==
+                std::vector<std::uint16_t>{65'534U, 65'535U, 0U, 2U, 20U},
+            "PID/BLP blocks did not expand across sequence wraparound");
+}
+
 void validates_headers_lengths_padding_and_report_ranges() {
     const auto wrong_version =
         rtcp::parse_compound_packet(bytes({0x40, 0xc9, 0x00, 0x01,
@@ -164,6 +204,29 @@ void validates_headers_lengths_padding_and_report_ranges() {
         static_cast<std::uint8_t>(rtcp::PacketType::SenderReport), 0, {}};
     require(!rtcp::serialize_compound_packet({{disguised_sender_report}}),
             "unknown packet accepted a supported RTCP packet type");
+
+    const auto empty_nack =
+        rtcp::serialize_compound_packet({{rtcp::GenericNack{}}});
+    require(!empty_nack, "Generic NACK without feedback was accepted");
+
+    const auto truncated_nack = rtcp::parse_compound_packet(bytes({
+        0x81, 0xcd, 0x00, 0x02,
+        0x00, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x02,
+    }));
+    require(!truncated_nack &&
+                truncated_nack.error().code ==
+                    rtcp::ParseErrorCode::InvalidPacketBody,
+            "Generic NACK without an FCI block was accepted");
+
+    const rtcp::UnknownPacket other_feedback_format{
+        static_cast<std::uint8_t>(rtcp::PacketType::TransportLayerFeedback),
+        2U,
+        bytes({0x00, 0x00, 0x00, 0x01}),
+    };
+    require(rtcp::serialize_compound_packet({{other_feedback_format}})
+                .has_value(),
+            "unsupported transport feedback format was not preserved as unknown");
 }
 
 void converts_ntp_timestamps_and_compact_durations() {
@@ -198,6 +261,8 @@ int main() {
         serializes_sender_report_and_sdes_as_network_bytes();
         preserves_receiver_report_fields_and_signed_loss();
         skips_unknown_packet_types_without_losing_boundaries();
+        serializes_and_parses_generic_nack_network_bytes();
+        packs_generic_nack_sequences_across_wraparound();
         validates_headers_lengths_padding_and_report_ranges();
         converts_ntp_timestamps_and_compact_durations();
         std::cout << "RTCP protocol tests passed\n";

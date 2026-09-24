@@ -18,6 +18,9 @@ constexpr std::size_t header_size = 4;
 constexpr std::size_t reception_report_size = 24;
 constexpr std::size_t sender_report_fixed_size = 28;
 constexpr std::size_t receiver_report_fixed_size = 8;
+constexpr std::size_t feedback_fixed_size = 12;
+constexpr std::size_t generic_nack_block_size = 4;
+constexpr std::uint8_t generic_nack_format = 1;
 constexpr std::int32_t minimum_signed_24 = -8'388'608;
 constexpr std::int32_t maximum_signed_24 = 8'388'607;
 constexpr std::size_t maximum_count = 31;
@@ -243,6 +246,33 @@ void append_report(std::vector<std::byte>& bytes,
     return bytes;
 }
 
+[[nodiscard]] SerializeResult serialize_generic_nack(
+    const GenericNack& nack) {
+    if (nack.feedback.empty()) {
+        return std::unexpected{
+            "an RTCP Generic NACK packet must contain feedback"};
+    }
+    const auto packet_size = feedback_fixed_size +
+                             nack.feedback.size() * generic_nack_block_size;
+    if (packet_size > maximum_packet_size) {
+        return std::unexpected{"RTCP Generic NACK packet is too large"};
+    }
+
+    std::vector<std::byte> bytes;
+    bytes.reserve(packet_size);
+    append_header(bytes, generic_nack_format,
+                  static_cast<std::uint8_t>(
+                      PacketType::TransportLayerFeedback),
+                  packet_size);
+    append_u32(bytes, nack.sender_ssrc);
+    append_u32(bytes, nack.media_source_ssrc);
+    for (const auto& block : nack.feedback) {
+        append_u16(bytes, block.packet_id);
+        append_u16(bytes, block.lost_packet_bitmask);
+    }
+    return bytes;
+}
+
 [[nodiscard]] SerializeResult serialize_unknown(
     const UnknownPacket& packet) {
     if (packet.count > maximum_count) {
@@ -257,7 +287,10 @@ void append_report(std::vector<std::byte>& bytes,
         packet.packet_type ==
             static_cast<std::uint8_t>(PacketType::ReceiverReport) ||
         packet.packet_type ==
-            static_cast<std::uint8_t>(PacketType::SourceDescription)) {
+            static_cast<std::uint8_t>(PacketType::SourceDescription) ||
+        (packet.packet_type ==
+             static_cast<std::uint8_t>(PacketType::TransportLayerFeedback) &&
+         packet.count == generic_nack_format)) {
         return std::unexpected{
             "an unknown RTCP packet cannot use a supported packet type"};
     }
@@ -402,6 +435,31 @@ parse_source_description(const std::span<const std::byte> bytes,
     return description;
 }
 
+[[nodiscard]] std::expected<GenericNack, ParseError> parse_generic_nack(
+    const std::span<const std::byte> bytes,
+    const std::size_t packet_offset,
+    const std::size_t body_end) {
+    const auto packet_size = body_end - packet_offset;
+    if (packet_size < feedback_fixed_size + generic_nack_block_size ||
+        (packet_size - feedback_fixed_size) % generic_nack_block_size != 0U) {
+        return std::unexpected{parse_error(
+            ParseErrorCode::InvalidPacketBody, packet_offset,
+            "RTCP Generic NACK must contain one or more complete feedback blocks")};
+    }
+
+    GenericNack nack;
+    nack.sender_ssrc = read_u32(bytes, packet_offset + 4U);
+    nack.media_source_ssrc = read_u32(bytes, packet_offset + 8U);
+    auto cursor = packet_offset + feedback_fixed_size;
+    nack.feedback.reserve((body_end - cursor) / generic_nack_block_size);
+    while (cursor < body_end) {
+        nack.feedback.push_back({read_u16(bytes, cursor),
+                                 read_u16(bytes, cursor + 2U)});
+        cursor += generic_nack_block_size;
+    }
+    return nack;
+}
+
 }  // namespace
 
 ParseResult parse_compound_packet(const std::span<const std::byte> bytes) {
@@ -479,6 +537,15 @@ ParseResult parse_compound_packet(const std::span<const std::byte> bytes) {
                 return std::unexpected{std::move(description.error())};
             }
             compound.packets.emplace_back(std::move(*description));
+        } else if (
+            packet_type == static_cast<std::uint8_t>(
+                               PacketType::TransportLayerFeedback) &&
+            count == generic_nack_format) {
+            auto nack = parse_generic_nack(bytes, cursor, body_end);
+            if (!nack) {
+                return std::unexpected{std::move(nack.error())};
+            }
+            compound.packets.emplace_back(std::move(*nack));
         } else {
             UnknownPacket unknown;
             unknown.packet_type = packet_type;
@@ -512,6 +579,8 @@ SerializeResult serialize_compound_packet(const CompoundPacket& compound) {
                 } else if constexpr (std::is_same_v<Value,
                                                     SourceDescription>) {
                     return serialize_source_description(value);
+                } else if constexpr (std::is_same_v<Value, GenericNack>) {
+                    return serialize_generic_nack(value);
                 } else {
                     return serialize_unknown(value);
                 }
@@ -523,6 +592,51 @@ SerializeResult serialize_compound_packet(const CompoundPacket& compound) {
         result.insert(result.end(), serialized->begin(), serialized->end());
     }
     return result;
+}
+
+std::vector<GenericNackBlock> pack_generic_nack_blocks(
+    const std::span<const std::uint16_t> lost_sequences) {
+    std::vector<std::uint16_t> unique_sequences;
+    unique_sequences.reserve(lost_sequences.size());
+    for (const auto sequence : lost_sequences) {
+        if (std::find(unique_sequences.begin(), unique_sequences.end(),
+                      sequence) == unique_sequences.end()) {
+            unique_sequences.push_back(sequence);
+        }
+    }
+
+    std::vector<GenericNackBlock> feedback;
+    for (const auto sequence : unique_sequences) {
+        if (!feedback.empty()) {
+            auto& block = feedback.back();
+            const auto distance = static_cast<std::uint16_t>(
+                sequence - block.packet_id);
+            if (distance >= 1U && distance <= 16U) {
+                block.lost_packet_bitmask |= static_cast<std::uint16_t>(
+                    1U << (distance - 1U));
+                continue;
+            }
+        }
+        feedback.push_back({sequence, 0U});
+    }
+    return feedback;
+}
+
+std::vector<std::uint16_t> expand_generic_nack_blocks(
+    const std::span<const GenericNackBlock> feedback) {
+    std::vector<std::uint16_t> sequences;
+    sequences.reserve(feedback.size());
+    for (const auto& block : feedback) {
+        sequences.push_back(block.packet_id);
+        for (std::uint16_t bit = 0; bit < 16U; ++bit) {
+            if ((block.lost_packet_bitmask &
+                 static_cast<std::uint16_t>(1U << bit)) != 0U) {
+                sequences.push_back(static_cast<std::uint16_t>(
+                    block.packet_id + bit + 1U));
+            }
+        }
+    }
+    return sequences;
 }
 
 }  // namespace semilive::common::rtcp

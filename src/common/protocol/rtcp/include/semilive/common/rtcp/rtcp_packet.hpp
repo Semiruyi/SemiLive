@@ -65,6 +65,21 @@ struct SourceDescription {
     bool operator==(const SourceDescription&) const = default;
 };
 
+struct GenericNackBlock {
+    std::uint16_t packet_id = 0;
+    std::uint16_t lost_packet_bitmask = 0;
+
+    bool operator==(const GenericNackBlock&) const = default;
+};
+
+struct GenericNack {
+    std::uint32_t sender_ssrc = 0;
+    std::uint32_t media_source_ssrc = 0;
+    std::vector<GenericNackBlock> feedback;
+
+    bool operator==(const GenericNack&) const = default;
+};
+
 struct UnknownPacket {
     std::uint8_t packet_type = 0;
     std::uint8_t count = 0;
@@ -74,7 +89,7 @@ struct UnknownPacket {
 };
 
 using Packet = std::variant<SenderReport, ReceiverReport, SourceDescription,
-                            UnknownPacket>;
+                            GenericNack, UnknownPacket>;
 
 struct CompoundPacket {
     std::vector<Packet> packets;
@@ -108,5 +123,13 @@ using SerializeResult =
 
 [[nodiscard]] SerializeResult serialize_compound_packet(
     const CompoundPacket& compound);
+
+// Sequence numbers must be supplied oldest first. Duplicate values are ignored.
+// Unsigned 16-bit distance keeps a sequence such as 65535, 0, 1 contiguous.
+[[nodiscard]] std::vector<GenericNackBlock> pack_generic_nack_blocks(
+    std::span<const std::uint16_t> lost_sequences);
+
+[[nodiscard]] std::vector<std::uint16_t> expand_generic_nack_blocks(
+    std::span<const GenericNackBlock> feedback);
 
 }  // namespace semilive::common::rtcp
