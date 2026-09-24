@@ -1,0 +1,10 @@
+add_executable(semilive_publisher_rtp_retransmission_cache_test
+    rtp_retransmission_cache_test.cpp
+)
+target_link_libraries(semilive_publisher_rtp_retransmission_cache_test PRIVATE
+    SemiLive::PublisherDomain
+)
+semilive_enable_warnings(semilive_publisher_rtp_retransmission_cache_test)
+
+add_test(NAME semilive_publisher_rtp_retransmission_cache
+         COMMAND semilive_publisher_rtp_retransmission_cache_test)

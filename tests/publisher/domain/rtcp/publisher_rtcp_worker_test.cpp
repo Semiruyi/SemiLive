@@ -102,7 +102,7 @@ void sends_sr_and_consumes_matching_rr() {
     auto sender_state = std::make_shared<domain::RtpSenderState>();
     sender_state->begin_session(0x1122'3344U);
     sender_state->record_sent_packet(
-        90'000U, 1'000U, std::chrono::steady_clock::now());
+        10U, 90'000U, 1'000U, {}, std::chrono::steady_clock::now());
     auto notifier = std::make_shared<SynchronousNotifier>();
     auto transport = std::make_unique<FakeTransport>();
     auto* transport_view = transport.get();
@@ -162,15 +162,22 @@ void sends_sr_and_consumes_matching_rr() {
 void sender_state_is_session_scoped() {
     domain::RtpSenderState state;
     state.begin_session(9U);
-    state.record_sent_packet(100U, 7U,
+    const auto datagram = std::vector<std::byte>{std::byte{1}, std::byte{2}};
+    state.record_sent_packet(10U, 100U, 7U, datagram,
                              std::chrono::steady_clock::time_point{});
     const auto snapshot = state.snapshot();
     require(snapshot && snapshot->ssrc == 9U &&
                 snapshot->packet_count == 1U &&
                 snapshot->payload_octet_count == 7U,
             "RTP sender state did not record a packet");
+    require(state.find_retransmission_packet(
+                10U, std::chrono::steady_clock::time_point{}) == datagram,
+            "RTP sender state did not cache the sent datagram");
     state.end_session();
-    require(!state.snapshot(), "RTP sender state survived session end");
+    require(!state.snapshot() &&
+                !state.find_retransmission_packet(
+                    10U, std::chrono::steady_clock::time_point{}),
+            "RTP sender state survived session end");
 }
 
 }  // namespace

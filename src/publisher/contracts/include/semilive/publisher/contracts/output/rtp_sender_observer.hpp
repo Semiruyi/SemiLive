@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace semilive::publisher::contracts::output {
 
@@ -17,8 +18,10 @@ public:
 
     virtual void begin_session(std::uint32_t ssrc) noexcept = 0;
     virtual void record_sent_packet(
+        std::uint16_t sequence_number,
         std::uint32_t rtp_timestamp,
         std::size_t payload_octets,
+        std::span<const std::byte> datagram,
         std::chrono::steady_clock::time_point sent_at) noexcept = 0;
     virtual void end_session() noexcept = 0;
 

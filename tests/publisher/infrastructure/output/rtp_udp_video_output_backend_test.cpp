@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -157,6 +159,49 @@ private:
 #endif
 };
 
+struct ObservedRtpPacket {
+    std::uint16_t sequence_number = 0;
+    std::uint32_t timestamp = 0;
+    std::size_t payload_octets = 0;
+    std::vector<std::byte> datagram;
+};
+
+class RecordingRtpSenderObserver final : public contracts::RtpSenderObserver {
+public:
+    void begin_session(const std::uint32_t ssrc) noexcept override {
+        session_ssrc = ssrc;
+        session_ended = false;
+        packets.clear();
+    }
+
+    void record_sent_packet(
+        const std::uint16_t sequence_number,
+        const std::uint32_t rtp_timestamp,
+        const std::size_t payload_octets,
+        const std::span<const std::byte> datagram,
+        const std::chrono::steady_clock::time_point) noexcept override {
+        try {
+            packets.push_back({
+                sequence_number,
+                rtp_timestamp,
+                payload_octets,
+                {datagram.begin(), datagram.end()},
+            });
+        } catch (...) {
+            recording_failed = true;
+        }
+    }
+
+    void end_session() noexcept override {
+        session_ended = true;
+    }
+
+    std::uint32_t session_ssrc = 0;
+    bool session_ended = false;
+    bool recording_failed = false;
+    std::vector<ObservedRtpPacket> packets;
+};
+
 [[nodiscard]] model::EncodedVideoAccessUnit access_unit(
     std::vector<std::byte> annex_b,
     const std::chrono::nanoseconds presentation_time) {
@@ -171,7 +216,9 @@ private:
 
 void sends_packetized_access_unit_and_reports_udp_receipt() {
     Ipv4LoopbackReceiver receiver;
-    RtpUdpVideoOutputBackend backend{{"127.0.0.1", receiver.port(), 96, 18}};
+    auto observer = std::make_shared<RecordingRtpSenderObserver>();
+    RtpUdpVideoOutputBackend backend{
+        {"127.0.0.1", receiver.port(), 96, 18}, observer};
 
     const auto opened = backend.open();
     require(opened &&
@@ -223,6 +270,18 @@ void sends_packetized_access_unit_and_reports_udp_receipt() {
                 (value(datagrams[2][1]) & 0x80U) == 0 &&
                 value(datagrams[3][1]) == 0xe0,
             "only the final RTP packet of the access unit must set Marker");
+    require(!observer->recording_failed && observer->packets.size() == 4U &&
+                observer->session_ssrc == session_ssrc,
+            "sender observer did not receive the opened RTP session");
+    for (std::size_t index = 0; index < datagrams.size(); ++index) {
+        require(observer->packets[index].sequence_number ==
+                    read_u16(datagrams[index], 2) &&
+                    observer->packets[index].timestamp == first_timestamp &&
+                    observer->packets[index].payload_octets ==
+                        datagrams[index].size() - 12U &&
+                    observer->packets[index].datagram == datagrams[index],
+                "sender observer did not receive a complete sent RTP datagram");
+    }
 
     const auto next_encoded = access_unit(
         {std::byte{0x00}, std::byte{0x00}, std::byte{0x01},
@@ -242,6 +301,9 @@ void sends_packetized_access_unit_and_reports_udp_receipt() {
             "SSRC must remain stable across access units in one session");
     require(value(next_datagram[1]) == 0xe0,
             "single packet second AU must carry the Marker bit");
+    require(observer->packets.size() == 5U &&
+                observer->packets.back().datagram == next_datagram,
+            "sender observer did not receive the later RTP datagram");
 
     const auto flushed = backend.flush();
     require(flushed && flushed->emitted_units == 0 &&
@@ -251,6 +313,8 @@ void sends_packetized_access_unit_and_reports_udp_receipt() {
     require(!backend.consume(encoded),
             "flushed RTP session must reject additional access units");
     backend.close();
+    require(observer->session_ended,
+            "sender observer did not receive the RTP session end");
     backend.close();
 }
 

@@ -221,8 +221,10 @@ RtpUdpVideoOutputBackend::Impl::consume(
             ++sent_datagrams;
             if (sender_observer && datagram.size() >= 12U) {
                 sender_observer->record_sent_packet(
+                    read_u16(datagram.subspan(2U, 2U)),
                     read_u32(datagram.subspan(4U, 4U)),
                     datagram.size() - 12U,
+                    datagram,
                     std::chrono::steady_clock::now());
             }
             return {};
