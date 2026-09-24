@@ -43,6 +43,9 @@ constexpr std::size_t maximum_udp_payload_size = 65'507;
 using NativeSocket = SOCKET;
 using SocketLength = int;
 constexpr NativeSocket invalid_socket = INVALID_SOCKET;
+// MinGW headers do not expose Microsoft's SIO_UDP_CONNRESET symbol.
+constexpr DWORD udp_connection_reset_control_code =
+    _WSAIOW(IOC_VENDOR, 12);
 
 [[nodiscard]] std::int64_t current_socket_error() noexcept {
     return static_cast<std::int64_t>(WSAGetLastError());
@@ -190,6 +193,26 @@ configure_receive_buffer(const NativeSocket socket,
     return static_cast<std::size_t>(actual);
 }
 
+[[nodiscard]] std::expected<void, TransportIssue>
+configure_unreachable_peer_behavior(const NativeSocket socket) {
+#if defined(_WIN32)
+    BOOL report_connection_resets = FALSE;
+    DWORD bytes_returned = 0;
+    if (WSAIoctl(socket, udp_connection_reset_control_code,
+                 &report_connection_resets,
+                 static_cast<DWORD>(sizeof(report_connection_resets)),
+                 nullptr, 0, &bytes_returned, nullptr, nullptr) ==
+        SOCKET_ERROR) {
+        return std::unexpected{issue(
+            TransportOperation::Open, current_socket_error(),
+            "failed to disable RTCP UDP connection reset notifications")};
+    }
+#else
+    static_cast<void>(socket);
+#endif
+    return {};
+}
+
 [[nodiscard]] std::expected<std::pair<std::string, std::uint16_t>,
                             TransportIssue>
 bound_endpoint(const NativeSocket socket) {
@@ -315,6 +338,12 @@ TransportOpenResult UdpTransport::Impl::open(const TransportConfig& config) {
         return std::unexpected{issue(
             TransportOperation::Open, code,
             "failed to create RTCP UDP socket")};
+    }
+    if (auto configured = configure_unreachable_peer_behavior(socket);
+        !configured) {
+        auto error = std::move(configured.error());
+        close();
+        return std::unexpected{std::move(error)};
     }
     auto receive_buffer_size =
         configure_receive_buffer(socket, config.receive_buffer_bytes);
