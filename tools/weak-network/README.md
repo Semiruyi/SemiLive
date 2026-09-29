@@ -1,7 +1,8 @@
 # Random-loss baseline runner
 
-`run-random-loss-baseline.ps1` runs the current no-retransmission pipeline through the deterministic UDP relay,
-validates the machine-readable reports, and writes per-run and aggregate CSV files.
+`run-random-loss-baseline.ps1` runs the video pipeline through the deterministic UDP relay, validates the
+machine-readable reports, and writes per-run and aggregate CSV files. Without `-EnableRtcp` it records the
+no-feedback baseline; with `-EnableRtcp` it enables SR/RR, Generic NACK, and original RTP datagram retransmission.
 
 Build the Windows binaries first, then run a short pilot from PowerShell:
 
@@ -29,8 +30,9 @@ H.264 file is removed after report validation unless `-KeepMedia` is specified.
 
 `-EnableRtcp` opens a direct control path on Publisher port 5005 and Receiver port 5007. Override these with
 `-PublisherRtcpPort` and `-ReceiverRtcpPort` if necessary. The control path is intentionally outside the one-way RTP
-loss relay: RR still measures the impaired forward RTP stream, while feedback delivery stays reliable for this first
-baseline. SR/RR is observation only at this stage and does not retransmit media.
+loss relay: RR and NACK describe the impaired forward RTP stream while feedback delivery stays reliable. A Generic
+NACK cache hit retransmits the original RTP datagram through the same impaired forward Relay. This is not an RFC
+4588 RTX stream with a separate payload type, SSRC, and sequence space.
 
 Use file output for the measured baseline. Run separate ffplay sessions for visual checks so player scheduling and
 output backpressure do not contaminate the transport comparison.
