@@ -85,6 +85,19 @@ function Get-OptionalProperty {
     return $property.Value
 }
 
+function Get-OptionalUInt64 {
+    param(
+        [object]$Object,
+        [string]$Name
+    )
+
+    $value = Get-OptionalProperty $Object $Name
+    if ($null -eq $value) {
+        return $null
+    }
+    return [UInt64]$value
+}
+
 function Wait-ProcessAndGetExitCode {
     param([Diagnostics.Process]$Process)
 
@@ -223,6 +236,8 @@ function Get-RunRows {
         } else { $null }
         $publisherRtcp = Get-OptionalProperty $publisher "rtcp"
         $receiverRtcp = Get-OptionalProperty $receiver "rtcp"
+        $receiverMissingTracker = Get-OptionalProperty `
+            $receiverRtcp "missing_tracker"
         $publisherFractionLostPercentValue = Get-OptionalProperty `
             $publisherRtcp "reported_fraction_lost_percent"
         $publisherFractionLostRaw = Get-OptionalProperty `
@@ -243,6 +258,16 @@ function Get-RunRows {
         } elseif ($null -ne $receiverFractionLostRaw) {
             100.0 * [double]$receiverFractionLostRaw / 256.0
         } else { $null }
+        $detectedMissingPackets = Get-OptionalUInt64 `
+            $receiverMissingTracker "detected_missing_packets"
+        $recoveredAfterNack = Get-OptionalUInt64 `
+            $receiverMissingTracker "recovered_after_nack"
+        $nackRecoveryRatePercent = if ($null -ne $detectedMissingPackets -and
+            $detectedMissingPackets -gt 0 -and
+            $null -ne $recoveredAfterNack) {
+            100.0 * [double]$recoveredAfterNack /
+                [double]$detectedMissingPackets
+        } else { $null }
 
         $rows += [PSCustomObject][ordered]@{
             run = $runDirectory.Name
@@ -261,6 +286,14 @@ function Get-RunRows {
             publisher_rtcp_reported_fraction_lost_percent = $publisherFractionLostPercent
             publisher_rtcp_reported_cumulative_lost = if ($null -ne $publisherRtcp) { $publisherRtcp.reported_cumulative_lost } else { $null }
             publisher_rtcp_reported_jitter_rtp_ticks = if ($null -ne $publisherRtcp) { $publisherRtcp.reported_jitter_rtp_ticks } else { $null }
+            publisher_nack_packets_received = Get-OptionalUInt64 $publisherRtcp "generic_nack_packets_received"
+            publisher_ignored_nack_packets = Get-OptionalUInt64 $publisherRtcp "ignored_generic_nack_packets"
+            publisher_nack_sequence_requests_received = Get-OptionalUInt64 $publisherRtcp "nack_sequence_requests_received"
+            publisher_nack_sequence_requests_ignored = Get-OptionalUInt64 $publisherRtcp "nack_sequence_requests_ignored"
+            publisher_retransmission_cache_hits = Get-OptionalUInt64 $publisherRtcp "retransmission_cache_hits"
+            publisher_retransmission_cache_misses = Get-OptionalUInt64 $publisherRtcp "retransmission_cache_misses"
+            publisher_retransmitted_packets = Get-OptionalUInt64 $publisherRtcp "retransmitted_packets"
+            publisher_retransmitted_bytes = Get-OptionalUInt64 $publisherRtcp "retransmitted_bytes"
             relay_received_datagrams = [UInt64]$traffic.received_datagrams
             relay_forwarded_datagrams = [UInt64]$traffic.forwarded_datagrams
             relay_dropped_datagrams = [UInt64]$traffic.dropped_datagrams
@@ -273,6 +306,19 @@ function Get-RunRows {
             receiver_rtcp_fraction_lost_percent = $receiverFractionLostPercent
             receiver_rtcp_cumulative_lost = if ($null -ne $receiverRtcp) { $receiverRtcp.cumulative_lost } else { $null }
             receiver_rtcp_interarrival_jitter_rtp_ticks = if ($null -ne $receiverRtcp) { $receiverRtcp.interarrival_jitter_rtp_ticks } else { $null }
+            receiver_nack_packets_sent = Get-OptionalUInt64 $receiverRtcp "generic_nack_packets_sent"
+            receiver_nack_sequence_requests_sent = Get-OptionalUInt64 $receiverRtcp "nack_sequence_requests_sent"
+            receiver_detected_missing_packets = $detectedMissingPackets
+            receiver_recovered_before_nack = Get-OptionalUInt64 $receiverMissingTracker "recovered_before_nack"
+            receiver_recovered_after_nack = $recoveredAfterNack
+            receiver_nack_recovery_rate_percent = $nackRecoveryRatePercent
+            receiver_nack_batches = Get-OptionalUInt64 $receiverMissingTracker "nack_batches"
+            receiver_nack_retry_requests = Get-OptionalUInt64 $receiverMissingTracker "nack_retry_requests"
+            receiver_nack_exhausted_packets = Get-OptionalUInt64 $receiverMissingTracker "exhausted_packets"
+            receiver_nack_abandoned_packets = Get-OptionalUInt64 $receiverMissingTracker "abandoned_packets"
+            receiver_nack_capacity_ignored_packets = Get-OptionalUInt64 $receiverMissingTracker "capacity_ignored_packets"
+            receiver_nack_pending_packets = Get-OptionalUInt64 $receiverMissingTracker "pending_packets"
+            receiver_nack_peak_pending_packets = Get-OptionalUInt64 $receiverMissingTracker "peak_pending_packets"
             discarded_access_units = [UInt64]$assembler.discarded_access_units
             dropped_while_waiting = [UInt64]$recovery.dropped_while_waiting
             recovery_episodes_started = [UInt64]$recovery.episodes_started
