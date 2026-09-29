@@ -61,6 +61,7 @@ private:
     report.config.rtcp->transport.bind_port = 5007;
     report.config.rtcp->transport.peer_address = "127.0.0.1";
     report.config.rtcp->transport.peer_port = 5005;
+    report.config.rtcp->receive_poll_interval = 7ms;
     report.stats.session_id = 7;
     report.stats.session_duration = 1'234ms;
     report.stats.first_output_delay = 45ms;
@@ -88,12 +89,22 @@ private:
         "127.0.0.1", 5007, 1'500, 262'144};
     report.stats.rtcp->sender_reports_received = 12;
     report.stats.rtcp->receiver_reports_sent = 11;
+    report.stats.rtcp->generic_nack_packets_sent = 4;
+    report.stats.rtcp->nack_sequence_requests_sent = 6;
     report.stats.rtcp->current_fraction_lost = 13;
     report.stats.rtcp->cumulative_lost = 7;
     report.stats.rtcp->extended_highest_sequence = 65'540;
     report.stats.rtcp->interarrival_jitter = 900;
     report.stats.rtcp->last_sender_report = 0x1234'5678U;
     report.stats.rtcp->delay_since_last_sender_report = 65'536;
+    report.stats.rtcp->missing_tracker.source_ssrc = 0x1234'5678U;
+    report.stats.rtcp->missing_tracker.detected_missing_packets = 5;
+    report.stats.rtcp->missing_tracker.nack_batches = 4;
+    report.stats.rtcp->missing_tracker.nack_sequence_requests = 6;
+    report.stats.rtcp->missing_tracker.recovered_before_nack = 1;
+    report.stats.rtcp->missing_tracker.recovered_after_nack = 2;
+    report.stats.rtcp->missing_tracker.nack_retry_requests = 3;
+    report.stats.rtcp->missing_tracker.exhausted_packets = 2;
     return report;
 }
 
@@ -129,9 +140,21 @@ void renders_machine_readable_baseline_fields() {
             "report must expose baseline transport and recovery metrics");
     require(json.find("\"bind_port\": 5007") != std::string::npos &&
                 json.find("\"peer_port\": 5005") != std::string::npos &&
+                json.find("\"receive_poll_interval_ms\": 7") !=
+                    std::string::npos &&
                 json.find("\"sender_reports_received\": 12") !=
                     std::string::npos &&
                 json.find("\"receiver_reports_sent\": 11") !=
+                    std::string::npos &&
+                json.find("\"generic_nack_packets_sent\": 4") !=
+                    std::string::npos &&
+                json.find("\"nack_sequence_requests_sent\": 6") !=
+                    std::string::npos &&
+                json.find("\"nack_sequence_requests\": 6") !=
+                    std::string::npos &&
+                json.find("\"recovered_after_nack\": 2") !=
+                    std::string::npos &&
+                json.find("\"nack_retry_requests\": 3") !=
                     std::string::npos &&
                 json.find("\"current_fraction_lost\": 13") !=
                     std::string::npos &&

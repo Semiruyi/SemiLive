@@ -115,6 +115,15 @@ void RtpMissingTracker::observe(
 
 std::vector<std::uint16_t> RtpMissingTracker::take_due_nacks(
     const Clock::time_point now) {
+    auto batch = take_due_nack_batch(now);
+    if (!batch) {
+        return {};
+    }
+    return std::move(batch->sequences);
+}
+
+std::optional<RtpNackBatch> RtpMissingTracker::take_due_nack_batch(
+    const Clock::time_point now) {
     std::lock_guard lock{mutex_};
     const auto observed_now = observe_time_locked(now);
     std::vector<std::pair<std::uint64_t, std::uint16_t>> ordered_due;
@@ -145,7 +154,10 @@ std::vector<std::uint16_t> RtpMissingTracker::take_due_nacks(
         static_cast<void>(order);
         due.push_back(sequence);
     }
-    return due;
+    if (due.empty() || !source_ssrc_) {
+        return std::nullopt;
+    }
+    return RtpNackBatch{*source_ssrc_, std::move(due)};
 }
 
 void RtpMissingTracker::abandon(

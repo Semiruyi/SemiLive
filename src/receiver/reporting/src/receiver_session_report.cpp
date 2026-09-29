@@ -176,7 +176,9 @@ void write_rtcp_config(std::ostream& output,
               "      \"receive_buffer_bytes\": "
            << rtcp.transport.receive_buffer_bytes << ",\n"
               "      \"report_interval_ms\": "
-           << rtcp.report_interval.count() << "\n"
+           << rtcp.report_interval.count() << ",\n"
+              "      \"receive_poll_interval_ms\": "
+           << rtcp.receive_poll_interval.count() << "\n"
               "    },\n";
 }
 
@@ -393,6 +395,10 @@ void write_rtcp(std::ostream& output, const Stats& stats) {
            << rtcp.sender_reports_received << ",\n"
               "    \"receiver_reports_sent\": "
            << rtcp.receiver_reports_sent << ",\n"
+              "    \"generic_nack_packets_sent\": "
+           << rtcp.generic_nack_packets_sent << ",\n"
+              "    \"nack_sequence_requests_sent\": "
+           << rtcp.nack_sequence_requests_sent << ",\n"
               "    \"invalid_packets\": "
            << rtcp.invalid_packets << ",\n"
               "    \"ignored_sender_reports\": "
@@ -417,7 +423,37 @@ void write_rtcp(std::ostream& output, const Stats& stats) {
     output << ",\n"
               "    \"delay_since_last_sender_report\": ";
     write_optional_integer(output, rtcp.delay_since_last_sender_report);
-    output << "\n"
+    const auto& missing = rtcp.missing_tracker;
+    output << ",\n"
+              "    \"missing_tracker\": {\n"
+              "      \"source_ssrc\": ";
+    write_optional_integer(output, missing.source_ssrc);
+    output << ",\n"
+              "      \"observed_packets\": "
+           << missing.observed_packets << ",\n"
+              "      \"detected_missing_packets\": "
+           << missing.detected_missing_packets << ",\n"
+              "      \"recovered_before_nack\": "
+           << missing.recovered_before_nack << ",\n"
+              "      \"recovered_after_nack\": "
+           << missing.recovered_after_nack << ",\n"
+              "      \"nack_batches\": "
+           << missing.nack_batches << ",\n"
+              "      \"nack_sequence_requests\": "
+           << missing.nack_sequence_requests << ",\n"
+              "      \"nack_retry_requests\": "
+           << missing.nack_retry_requests << ",\n"
+              "      \"exhausted_packets\": "
+           << missing.exhausted_packets << ",\n"
+              "      \"abandoned_packets\": "
+           << missing.abandoned_packets << ",\n"
+              "      \"capacity_ignored_packets\": "
+           << missing.capacity_ignored_packets << ",\n"
+              "      \"pending_packets\": "
+           << missing.pending_packets << ",\n"
+              "      \"peak_pending_packets\": "
+           << missing.peak_pending_packets << "\n"
+              "    }\n"
               "  },\n";
 }
 

@@ -2,6 +2,7 @@
 
 #include <semilive/common/rtcp/ntp_time.hpp>
 #include <semilive/common/rtcp/rtcp_packet.hpp>
+#include <semilive/receiver/domain/rtp/rtp_missing_tracker.hpp>
 #include <semilive/receiver/domain/rtp/rtp_reception_statistics.hpp>
 
 #include <algorithm>
@@ -57,11 +58,14 @@ using Clock = std::chrono::steady_clock;
 struct DefaultReceiverRtcpWorker::Impl {
     Impl(ReceiverRtcpWorkerConfig config,
          std::unique_ptr<common::rtcp::Transport> transport,
-         std::shared_ptr<RtpReceptionStatistics> reception_statistics)
+         std::shared_ptr<RtpReceptionStatistics> reception_statistics,
+         std::shared_ptr<RtpMissingTracker> missing_tracker)
         : config{std::move(config)},
           transport{std::move(transport)},
-          reception_statistics{std::move(reception_statistics)} {
-        if (!this->transport || !this->reception_statistics) {
+          reception_statistics{std::move(reception_statistics)},
+          missing_tracker{std::move(missing_tracker)} {
+        if (!this->transport || !this->reception_statistics ||
+            !this->missing_tracker) {
             throw std::invalid_argument{
                 "receiver RTCP worker dependencies must not be null"};
         }
@@ -78,6 +82,7 @@ struct DefaultReceiverRtcpWorker::Impl {
 
     void run(std::stop_token stop_token) noexcept;
     [[nodiscard]] bool send_receiver_report(Clock::time_point now);
+    [[nodiscard]] bool send_due_nacks(Clock::time_point now);
     [[nodiscard]] bool receive_once(std::chrono::milliseconds timeout);
     void process_sender_report(const common::rtcp::SenderReport& report,
                                Clock::time_point received_at);
@@ -86,6 +91,7 @@ struct DefaultReceiverRtcpWorker::Impl {
     ReceiverRtcpWorkerConfig config;
     std::unique_ptr<common::rtcp::Transport> transport;
     std::shared_ptr<RtpReceptionStatistics> reception_statistics;
+    std::shared_ptr<RtpMissingTracker> missing_tracker;
     mutable std::mutex mutex;
     ReceiverRtcpWorkerStats worker_stats;
     std::uint32_t local_ssrc = 0;
@@ -162,8 +168,12 @@ DefaultReceiverRtcpWorker::Impl::state() const noexcept {
 
 ReceiverRtcpWorkerStats
 DefaultReceiverRtcpWorker::Impl::stats() const noexcept {
-    std::lock_guard lock{mutex};
-    return worker_stats;
+    auto result = [&] {
+        std::lock_guard lock{mutex};
+        return worker_stats;
+    }();
+    result.missing_tracker = missing_tracker->stats();
+    return result;
 }
 
 void DefaultReceiverRtcpWorker::Impl::run(
@@ -177,12 +187,52 @@ void DefaultReceiverRtcpWorker::Impl::run(
             }
             next_report = now + config.report_interval;
         }
+        if (!send_due_nacks(now)) {
+            return;
+        }
         const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(
             std::max(Clock::duration::zero(), next_report - Clock::now()));
         const auto timeout = std::min(config.receive_poll_interval, remaining);
         if (!receive_once(timeout)) {
             return;
         }
+    }
+}
+
+bool DefaultReceiverRtcpWorker::Impl::send_due_nacks(
+    const Clock::time_point now) {
+    try {
+        auto batch = missing_tracker->take_due_nack_batch(now);
+        if (!batch) {
+            return true;
+        }
+        auto feedback =
+            common::rtcp::pack_generic_nack_blocks(batch->sequences);
+        common::rtcp::CompoundPacket compound{{common::rtcp::GenericNack{
+            local_ssrc, batch->source_ssrc, std::move(feedback)}}};
+        auto serialized = common::rtcp::serialize_compound_packet(compound);
+        if (!serialized) {
+            fail(worker_issue(ReceiverRtcpWorkerOperation::Serialize,
+                              std::move(serialized.error())));
+            return false;
+        }
+        if (auto sent = transport->send(*serialized); !sent) {
+            fail(transport_issue(ReceiverRtcpWorkerOperation::Send,
+                                 std::move(sent.error())));
+            return false;
+        }
+        std::lock_guard lock{mutex};
+        ++worker_stats.generic_nack_packets_sent;
+        worker_stats.nack_sequence_requests_sent += batch->sequences.size();
+        return true;
+    } catch (const std::exception& error) {
+        fail(worker_issue(ReceiverRtcpWorkerOperation::Internal,
+                          error.what()));
+        return false;
+    } catch (...) {
+        fail(worker_issue(ReceiverRtcpWorkerOperation::Internal,
+                          "unknown error while sending Generic NACK"));
+        return false;
     }
 }
 
@@ -283,10 +333,11 @@ void DefaultReceiverRtcpWorker::Impl::fail(
 DefaultReceiverRtcpWorker::DefaultReceiverRtcpWorker(
     ReceiverRtcpWorkerConfig config,
     std::unique_ptr<common::rtcp::Transport> transport,
-    std::shared_ptr<RtpReceptionStatistics> reception_statistics)
+    std::shared_ptr<RtpReceptionStatistics> reception_statistics,
+    std::shared_ptr<RtpMissingTracker> missing_tracker)
     : impl_{std::make_unique<Impl>(
           std::move(config), std::move(transport),
-          std::move(reception_statistics))} {}
+          std::move(reception_statistics), std::move(missing_tracker))} {}
 
 DefaultReceiverRtcpWorker::~DefaultReceiverRtcpWorker() = default;
 

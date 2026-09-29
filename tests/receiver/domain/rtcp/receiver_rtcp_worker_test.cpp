@@ -1,6 +1,7 @@
 #include <semilive/common/rtcp/rtcp_packet.hpp>
 #include <semilive/common/rtcp/ntp_time.hpp>
 #include <semilive/receiver/domain/rtcp/default_receiver_rtcp_worker.hpp>
+#include <semilive/receiver/domain/rtp/rtp_missing_tracker.hpp>
 #include <semilive/receiver/domain/rtp/rtp_reception_statistics.hpp>
 
 #include <chrono>
@@ -118,7 +119,8 @@ void sends_rr_and_tracks_the_last_sender_report() {
     config.receive_poll_interval = 2ms;
     config.local_ssrc = 0xaabb'ccddU;
     domain::DefaultReceiverRtcpWorker worker{
-        config, std::move(transport), reception};
+        config, std::move(transport), reception,
+        std::make_shared<domain::RtpMissingTracker>()};
 
     require(worker.start().has_value(), "receiver RTCP worker did not start");
     const auto first_bytes = transport_view->wait_for_sent(1U);
@@ -162,11 +164,70 @@ void sends_rr_and_tracks_the_last_sender_report() {
             "receiver RTCP worker did not return to idle");
 }
 
+void sends_due_generic_nacks_and_retries_only_missing_packets() {
+    auto reception = std::make_shared<domain::RtpReceptionStatistics>();
+    auto missing = std::make_shared<domain::RtpMissingTracker>();
+    const auto started = std::chrono::steady_clock::now();
+    missing->observe(0x1122'3344U, 100U, started);
+    missing->observe(0x1122'3344U, 103U, started);
+
+    auto transport = std::make_unique<FakeTransport>();
+    auto* transport_view = transport.get();
+    domain::ReceiverRtcpWorkerConfig config;
+    config.transport.peer_address = "127.0.0.1";
+    config.transport.peer_port = 5005;
+    config.report_interval = 1s;
+    config.receive_poll_interval = 2ms;
+    config.local_ssrc = 0xaabb'ccddU;
+    domain::DefaultReceiverRtcpWorker worker{
+        config, std::move(transport), reception, missing};
+
+    require(worker.start().has_value(),
+            "receiver RTCP worker did not start for NACK test");
+    const auto first_bytes = transport_view->wait_for_sent(1U);
+    const auto first = common_rtcp::parse_compound_packet(first_bytes);
+    require(first.has_value() && first->packets.size() == 1U,
+            "first Generic NACK did not parse");
+    const auto* first_nack =
+        std::get_if<common_rtcp::GenericNack>(&first->packets.front());
+    require(first_nack != nullptr &&
+                first_nack->sender_ssrc == 0xaabb'ccddU &&
+                first_nack->media_source_ssrc == 0x1122'3344U &&
+                common_rtcp::expand_generic_nack_blocks(
+                    first_nack->feedback) ==
+                    std::vector<std::uint16_t>{101U, 102U},
+            "first Generic NACK did not contain the detected gap");
+
+    missing->observe(0x1122'3344U, 101U,
+                     std::chrono::steady_clock::now());
+    const auto retry_bytes = transport_view->wait_for_sent(2U);
+    const auto retry = common_rtcp::parse_compound_packet(retry_bytes);
+    require(retry.has_value() && retry->packets.size() == 1U,
+            "Generic NACK retry did not parse");
+    const auto* retry_nack =
+        std::get_if<common_rtcp::GenericNack>(&retry->packets.front());
+    require(retry_nack != nullptr &&
+                common_rtcp::expand_generic_nack_blocks(
+                    retry_nack->feedback) ==
+                    std::vector<std::uint16_t>{102U},
+            "Generic NACK retry included a packet recovered after NACK");
+
+    const auto stats = worker.stats();
+    require(stats.generic_nack_packets_sent == 2U &&
+                stats.nack_sequence_requests_sent == 3U &&
+                stats.missing_tracker.recovered_after_nack == 1U &&
+                stats.missing_tracker.nack_retry_requests == 1U &&
+                stats.missing_tracker.exhausted_packets == 1U,
+            "Generic NACK worker statistics are incomplete");
+    worker.stop();
+}
+
 }  // namespace
 
 int main() {
     try {
         sends_rr_and_tracks_the_last_sender_report();
+        sends_due_generic_nacks_and_retries_only_missing_packets();
         std::cout << "receiver RTCP worker tests passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {

@@ -115,7 +115,7 @@ ReceiverCompositionResult ReceiverComposition::Impl::assemble() {
             rtcp = std::make_unique<domain::DefaultReceiverRtcpWorker>(
                 std::move(rtcp_config),
                 std::make_unique<common::rtcp::UdpTransport>(),
-                reception_statistics);
+                reception_statistics, missing_tracker);
         }
         worker_ = std::make_unique<domain::DefaultVideoReceiveWorker>(
             std::move(worker_config), std::move(input), std::move(pipeline),

@@ -42,6 +42,11 @@ struct RtpMissingTrackerStats {
     std::size_t peak_pending_packets = 0;
 };
 
+struct RtpNackBatch {
+    std::uint32_t source_ssrc = 0;
+    std::vector<std::uint16_t> sequences;
+};
+
 class RtpMissingTracker final {
 public:
     using Clock = std::chrono::steady_clock;
@@ -53,6 +58,9 @@ public:
                  Clock::time_point received_at) noexcept;
 
     [[nodiscard]] std::vector<std::uint16_t> take_due_nacks(
+        Clock::time_point now);
+
+    [[nodiscard]] std::optional<RtpNackBatch> take_due_nack_batch(
         Clock::time_point now);
 
     void abandon(std::uint16_t first_missing,

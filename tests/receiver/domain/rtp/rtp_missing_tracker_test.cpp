@@ -116,6 +116,19 @@ void resets_tracking_when_the_source_changes() {
             "new RTP source inherited the previous source's missing state");
 }
 
+void returns_source_and_due_sequences_as_one_batch() {
+    domain::RtpMissingTracker tracker;
+    const auto start = Clock::time_point{};
+    tracker.observe(0x1122'3344U, 20U, start);
+    tracker.observe(0x1122'3344U, 23U, start + 1ms);
+
+    const auto batch = tracker.take_due_nack_batch(start + 11ms);
+    require(batch && batch->source_ssrc == 0x1122'3344U &&
+                batch->sequences ==
+                    std::vector<std::uint16_t>{21U, 22U},
+            "NACK batch did not preserve its RTP source");
+}
+
 void rejects_invalid_configuration() {
     require(!domain::validate_rtp_missing_tracker_config(
                 {-1ms, 20ms, 2U, 512U}) &&
@@ -137,6 +150,7 @@ int main() {
         tracks_gaps_across_sequence_wraparound();
         abandons_confirmed_gaps_and_bounds_pending_packets();
         resets_tracking_when_the_source_changes();
+        returns_source_and_due_sequences_as_one_batch();
         rejects_invalid_configuration();
         std::cout << "RTP missing tracker tests passed\n";
         return EXIT_SUCCESS;

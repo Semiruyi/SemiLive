@@ -1,6 +1,7 @@
 #pragma once
 
 #include <semilive/common/rtcp/rtcp_transport.hpp>
+#include <semilive/receiver/domain/rtp/rtp_missing_tracker.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -13,7 +14,7 @@ namespace semilive::receiver::domain {
 struct ReceiverRtcpWorkerConfig {
     common::rtcp::TransportConfig transport;
     std::chrono::milliseconds report_interval{1000};
-    std::chrono::milliseconds receive_poll_interval{20};
+    std::chrono::milliseconds receive_poll_interval{10};
     std::optional<std::uint32_t> local_ssrc;
 };
 
@@ -43,6 +44,8 @@ struct ReceiverRtcpWorkerStats {
     std::optional<common::rtcp::TransportInfo> transport;
     std::uint64_t sender_reports_received = 0;
     std::uint64_t receiver_reports_sent = 0;
+    std::uint64_t generic_nack_packets_sent = 0;
+    std::uint64_t nack_sequence_requests_sent = 0;
     std::uint64_t invalid_packets = 0;
     std::uint64_t ignored_sender_reports = 0;
     std::optional<std::uint8_t> current_fraction_lost;
@@ -51,6 +54,7 @@ struct ReceiverRtcpWorkerStats {
     std::optional<std::uint32_t> interarrival_jitter;
     std::optional<std::uint32_t> last_sender_report;
     std::optional<std::uint32_t> delay_since_last_sender_report;
+    RtpMissingTrackerStats missing_tracker;
     std::optional<ReceiverRtcpWorkerIssue> last_issue;
 };
 

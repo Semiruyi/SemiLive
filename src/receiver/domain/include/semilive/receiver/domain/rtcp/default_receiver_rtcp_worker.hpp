@@ -7,13 +7,15 @@
 namespace semilive::receiver::domain {
 
 class RtpReceptionStatistics;
+class RtpMissingTracker;
 
 class DefaultReceiverRtcpWorker final : public ReceiverRtcpWorker {
 public:
     DefaultReceiverRtcpWorker(
         ReceiverRtcpWorkerConfig config,
         std::unique_ptr<common::rtcp::Transport> transport,
-        std::shared_ptr<RtpReceptionStatistics> reception_statistics);
+        std::shared_ptr<RtpReceptionStatistics> reception_statistics,
+        std::shared_ptr<RtpMissingTracker> missing_tracker);
     ~DefaultReceiverRtcpWorker() override;
 
     DefaultReceiverRtcpWorker(const DefaultReceiverRtcpWorker&) = delete;
