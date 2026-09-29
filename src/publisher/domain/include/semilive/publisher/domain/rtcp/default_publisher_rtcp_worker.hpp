@@ -1,6 +1,7 @@
 #pragma once
 
 #include <semilive/publisher/contracts/notifier/notifier.hpp>
+#include <semilive/publisher/contracts/output/rtp_retransmission_sender.hpp>
 #include <semilive/publisher/domain/rtcp/publisher_rtcp_worker.hpp>
 
 #include <memory>
@@ -15,6 +16,8 @@ public:
         PublisherRtcpWorkerConfig config,
         std::unique_ptr<common::rtcp::Transport> transport,
         std::shared_ptr<RtpSenderState> sender_state,
+        std::unique_ptr<contracts::output::RtpRetransmissionSender>
+            retransmission_sender,
         std::shared_ptr<contracts::Notifier> notifier);
     ~DefaultPublisherRtcpWorker() override;
 

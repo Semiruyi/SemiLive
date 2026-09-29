@@ -33,6 +33,7 @@ struct PublisherRtcpConfig {
     common::rtcp::TransportConfig transport;
     std::chrono::milliseconds report_interval{1000};
     std::chrono::milliseconds receive_poll_interval{20};
+    std::size_t maximum_nack_sequence_requests = 256;
 };
 
 struct PublisherConfig {

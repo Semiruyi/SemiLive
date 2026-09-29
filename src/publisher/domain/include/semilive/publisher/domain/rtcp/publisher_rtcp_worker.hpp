@@ -3,6 +3,7 @@
 #include <semilive/common/rtcp/rtcp_transport.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -15,6 +16,7 @@ struct PublisherRtcpWorkerConfig {
     std::chrono::milliseconds report_interval{1000};
     std::chrono::milliseconds receive_poll_interval{20};
     std::uint32_t rtp_clock_rate = 90'000;
+    std::size_t maximum_nack_sequence_requests = 256;
 };
 
 enum class PublisherRtcpWorkerState : std::uint8_t {
@@ -30,6 +32,8 @@ enum class PublisherRtcpWorkerOperation : std::uint8_t {
     Parse,
     Serialize,
     Send,
+    OpenRetransmissionSender,
+    Retransmit,
     TimeConversion,
     Internal,
 };
@@ -46,6 +50,14 @@ struct PublisherRtcpWorkerStats {
     std::optional<common::rtcp::TransportInfo> transport;
     std::uint64_t sender_reports_sent = 0;
     std::uint64_t receiver_reports_received = 0;
+    std::uint64_t generic_nack_packets_received = 0;
+    std::uint64_t ignored_generic_nack_packets = 0;
+    std::uint64_t nack_sequence_requests_received = 0;
+    std::uint64_t nack_sequence_requests_ignored = 0;
+    std::uint64_t retransmission_cache_hits = 0;
+    std::uint64_t retransmission_cache_misses = 0;
+    std::uint64_t retransmitted_packets = 0;
+    std::uint64_t retransmitted_bytes = 0;
     std::uint64_t invalid_packets = 0;
     std::uint64_t ignored_report_blocks = 0;
     std::uint64_t rtt_samples = 0;

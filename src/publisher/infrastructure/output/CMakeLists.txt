@@ -3,6 +3,7 @@ add_library(semilive_publisher_infra_output STATIC
     src/h264_file_output_backend.cpp
     src/h264_rtp_packetizer.cpp
     src/rtp_udp_video_output_backend.cpp
+    src/udp_rtp_retransmission_sender.cpp
     src/udp_socket.cpp
 )
 

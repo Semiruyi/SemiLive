@@ -1,4 +1,5 @@
 #include <semilive/publisher/infrastructure/output/rtp_udp_video_output_backend.hpp>
+#include <semilive/publisher/infrastructure/output/udp_rtp_retransmission_sender.hpp>
 
 #include <array>
 #include <chrono>
@@ -36,6 +37,8 @@ namespace model = semilive::publisher::model;
 
 using semilive::publisher::infra::output::RtpUdpVideoOutputBackend;
 using semilive::publisher::infra::output::RtpUdpVideoOutputConfig;
+using semilive::publisher::infra::output::UdpRtpRetransmissionSender;
+using semilive::publisher::infra::output::UdpRtpRetransmissionSenderConfig;
 
 #if defined(_WIN32)
 using NativeSocket = SOCKET;
@@ -390,6 +393,25 @@ void validates_configuration_and_production_random_source() {
     backend.close();
 }
 
+void sends_exact_retransmission_datagrams() {
+    Ipv4LoopbackReceiver receiver;
+    UdpRtpRetransmissionSender sender{
+        UdpRtpRetransmissionSenderConfig{"127.0.0.1", receiver.port()}};
+    require(sender.open().has_value(),
+            "UDP RTP retransmission sender did not open");
+    const std::vector<std::byte> datagram{
+        std::byte{0x80}, std::byte{0x60}, std::byte{0x12}, std::byte{0x34},
+        std::byte{0x56}, std::byte{0x78},
+    };
+    require(sender.send(datagram).has_value(),
+            "UDP RTP retransmission sender did not send");
+    require(receiver.receive() == datagram,
+            "UDP RTP retransmission sender changed the cached datagram");
+    sender.close();
+    require(!sender.send(datagram),
+            "closed UDP RTP retransmission sender accepted a datagram");
+}
+
 }  // namespace
 
 int main() {
@@ -397,6 +419,7 @@ int main() {
         sends_packetized_access_unit_and_reports_udp_receipt();
         maps_input_failures_and_requires_close_before_reuse();
         validates_configuration_and_production_random_source();
+        sends_exact_retransmission_datagrams();
     } catch (const std::exception& error) {
         std::cerr << "RTP/UDP video output backend test failed: "
                   << error.what() << '\n';

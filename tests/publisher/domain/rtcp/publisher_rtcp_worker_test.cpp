@@ -2,6 +2,7 @@
 #include <semilive/common/rtcp/ntp_time.hpp>
 #include <semilive/publisher/domain/rtcp/default_publisher_rtcp_worker.hpp>
 #include <semilive/publisher/domain/rtp/rtp_sender_state.hpp>
+#include <semilive/publisher/contracts/output/rtp_retransmission_sender.hpp>
 
 #include "publisher/support/notifier/synchronous_notifier.hpp"
 
@@ -98,6 +99,45 @@ private:
     std::vector<std::vector<std::byte>> sent_;
 };
 
+class FakeRetransmissionSender final
+    : public semilive::publisher::contracts::output::RtpRetransmissionSender {
+public:
+    semilive::publisher::contracts::output::RtpRetransmissionSenderResult
+    open() override {
+        std::lock_guard lock{mutex_};
+        opened_ = true;
+        return {};
+    }
+
+    semilive::publisher::contracts::output::RtpRetransmissionSenderResult
+    send(const std::span<const std::byte> datagram) override {
+        std::lock_guard lock{mutex_};
+        if (!opened_) {
+            return std::unexpected{
+                semilive::publisher::contracts::output::
+                    RtpRetransmissionSenderIssue{
+                        0, "fake retransmission sender is closed"}};
+        }
+        sent_.emplace_back(datagram.begin(), datagram.end());
+        return {};
+    }
+
+    void close() noexcept override {
+        std::lock_guard lock{mutex_};
+        opened_ = false;
+    }
+
+    [[nodiscard]] std::vector<std::vector<std::byte>> sent() const {
+        std::lock_guard lock{mutex_};
+        return sent_;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    bool opened_ = false;
+    std::vector<std::vector<std::byte>> sent_;
+};
+
 void sends_sr_and_consumes_matching_rr() {
     auto sender_state = std::make_shared<domain::RtpSenderState>();
     sender_state->begin_session(0x1122'3344U);
@@ -106,13 +146,16 @@ void sends_sr_and_consumes_matching_rr() {
     auto notifier = std::make_shared<SynchronousNotifier>();
     auto transport = std::make_unique<FakeTransport>();
     auto* transport_view = transport.get();
+    auto retransmission_sender =
+        std::make_unique<FakeRetransmissionSender>();
     domain::PublisherRtcpWorkerConfig config;
     config.transport.peer_address = "127.0.0.1";
     config.transport.peer_port = 5007;
     config.report_interval = 10ms;
     config.receive_poll_interval = 2ms;
     domain::DefaultPublisherRtcpWorker worker{
-        config, std::move(transport), sender_state, notifier};
+        config, std::move(transport), sender_state,
+        std::move(retransmission_sender), notifier};
 
     require(worker.start().has_value(), "publisher RTCP worker did not start");
     const auto sent = transport_view->wait_for_sent();
@@ -159,6 +202,84 @@ void sends_sr_and_consumes_matching_rr() {
             "publisher RTCP worker did not return to idle");
 }
 
+void retransmits_cached_rtp_for_matching_generic_nacks() {
+    auto sender_state = std::make_shared<domain::RtpSenderState>();
+    sender_state->begin_session(0x1122'3344U);
+    const std::vector<std::byte> cached{
+        std::byte{0x80}, std::byte{0x60}, std::byte{0x00}, std::byte{0x0a},
+        std::byte{0x11}, std::byte{0x22}, std::byte{0x33}, std::byte{0x44},
+    };
+    sender_state->record_sent_packet(
+        10U, 90'000U, 0U, cached, std::chrono::steady_clock::now());
+
+    auto notifier = std::make_shared<SynchronousNotifier>();
+    auto transport = std::make_unique<FakeTransport>();
+    auto* transport_view = transport.get();
+    auto retransmission_sender =
+        std::make_unique<FakeRetransmissionSender>();
+    auto* retransmission_view = retransmission_sender.get();
+    domain::PublisherRtcpWorkerConfig config;
+    config.transport.peer_address = "127.0.0.1";
+    config.transport.peer_port = 5007;
+    config.report_interval = 1s;
+    config.receive_poll_interval = 2ms;
+    config.maximum_nack_sequence_requests = 2U;
+    domain::DefaultPublisherRtcpWorker worker{
+        config, std::move(transport), sender_state,
+        std::move(retransmission_sender), notifier};
+
+    require(worker.start().has_value(),
+            "publisher RTCP worker did not start for NACK test");
+    const common_rtcp::GenericNack nack{
+        0xaabb'ccddU,
+        0x1122'3344U,
+        {{10U, 0x0001U}, {10U, 0x0003U}},
+    };
+    auto encoded = common_rtcp::serialize_compound_packet({{nack}});
+    require(encoded.has_value(), "test Generic NACK did not serialize");
+    transport_view->inject(std::move(*encoded));
+
+    const auto deadline = std::chrono::steady_clock::now() + 500ms;
+    while (worker.stats().retransmission_cache_misses == 0U &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    auto stats = worker.stats();
+    require(stats.generic_nack_packets_received == 1U &&
+                stats.nack_sequence_requests_received == 2U &&
+                stats.nack_sequence_requests_ignored == 3U &&
+                stats.retransmission_cache_hits == 1U &&
+                stats.retransmission_cache_misses == 1U &&
+                stats.retransmitted_packets == 1U &&
+                stats.retransmitted_bytes == cached.size() &&
+                retransmission_view->sent() ==
+                    std::vector<std::vector<std::byte>>{cached},
+            "publisher did not retransmit the exact cached RTP datagram");
+
+    const common_rtcp::GenericNack wrong_source{
+        0xaabb'ccddU,
+        0x5566'7788U,
+        common_rtcp::pack_generic_nack_blocks(
+            std::vector<std::uint16_t>{10U}),
+    };
+    auto encoded_wrong_source =
+        common_rtcp::serialize_compound_packet({{wrong_source}});
+    require(encoded_wrong_source.has_value(),
+            "wrong-source Generic NACK did not serialize");
+    transport_view->inject(std::move(*encoded_wrong_source));
+    const auto wrong_source_deadline =
+        std::chrono::steady_clock::now() + 500ms;
+    while (worker.stats().ignored_generic_nack_packets == 0U &&
+           std::chrono::steady_clock::now() < wrong_source_deadline) {
+        std::this_thread::yield();
+    }
+    stats = worker.stats();
+    require(stats.ignored_generic_nack_packets == 1U &&
+                stats.retransmitted_packets == 1U,
+            "publisher accepted a Generic NACK for another RTP source");
+    worker.stop();
+}
+
 void sender_state_is_session_scoped() {
     domain::RtpSenderState state;
     state.begin_session(9U);
@@ -185,6 +306,7 @@ void sender_state_is_session_scoped() {
 int main() {
     try {
         sends_sr_and_consumes_matching_rr();
+        retransmits_cached_rtp_for_matching_generic_nacks();
         sender_state_is_session_scoped();
         std::cout << "publisher RTCP worker tests passed\n";
         return EXIT_SUCCESS;

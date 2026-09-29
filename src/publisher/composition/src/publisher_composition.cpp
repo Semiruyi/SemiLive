@@ -12,6 +12,7 @@
 #include <semilive/publisher/infrastructure/ffmpeg/video_encoder/ffmpeg_h264_encoder_backend.hpp>
 #include <semilive/publisher/infrastructure/notifier/default_notifier.hpp>
 #include <semilive/publisher/infrastructure/output/rtp_udp_video_output_backend.hpp>
+#include <semilive/publisher/infrastructure/output/udp_rtp_retransmission_sender.hpp>
 #include <semilive/common/rtcp/udp_rtcp_transport.hpp>
 
 #if defined(_WIN32)
@@ -124,7 +125,8 @@ PublisherCompositionResult PublisherComposition::Impl::assemble() {
          config_.rtcp->transport.peer_port == 0 ||
          config_.rtcp->report_interval <= std::chrono::milliseconds::zero() ||
          config_.rtcp->receive_poll_interval <=
-             std::chrono::milliseconds::zero())) {
+             std::chrono::milliseconds::zero() ||
+         config_.rtcp->maximum_nack_sequence_requests == 0U)) {
         return std::unexpected{make_issue(
             PublisherCompositionOperation::ValidateConfig,
             "publisher RTCP endpoint and intervals are invalid")};
@@ -163,12 +165,20 @@ PublisherCompositionResult PublisherComposition::Impl::assemble() {
                 config_.rtcp->report_interval,
                 config_.rtcp->receive_poll_interval,
                 90'000U,
+                config_.rtcp->maximum_nack_sequence_requests,
             };
             rtcp_worker_ =
                 std::make_unique<domain::DefaultPublisherRtcpWorker>(
                     std::move(rtcp_config),
                     std::make_unique<common::rtcp::UdpTransport>(),
-                    rtp_sender_state_, notifier_);
+                    rtp_sender_state_,
+                    std::make_unique<
+                        infra::output::UdpRtpRetransmissionSender>(
+                        infra::output::UdpRtpRetransmissionSenderConfig{
+                            rtp.destination_address,
+                            rtp.destination_port,
+                        }),
+                    notifier_);
         }
 
         operation = PublisherCompositionOperation::CreateEncoderWorker;

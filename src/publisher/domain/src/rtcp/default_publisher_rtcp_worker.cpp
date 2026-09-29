@@ -2,6 +2,7 @@
 
 #include <semilive/common/rtcp/ntp_time.hpp>
 #include <semilive/common/rtcp/rtcp_packet.hpp>
+#include <semilive/publisher/contracts/output/rtp_retransmission_sender.hpp>
 #include <semilive/publisher/domain/rtcp/publisher_rtcp_worker_events.hpp>
 #include <semilive/publisher/domain/rtp/rtp_sender_state.hpp>
 
@@ -20,6 +21,7 @@
 #include <thread>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace semilive::publisher::domain {
 namespace {
@@ -37,6 +39,16 @@ using Clock = std::chrono::steady_clock;
     common::rtcp::TransportIssue issue) {
     auto message = issue.message;
     return {operation, std::move(issue), std::move(message)};
+}
+
+[[nodiscard]] PublisherRtcpWorkerIssue retransmission_issue(
+    const PublisherRtcpWorkerOperation operation,
+    contracts::output::RtpRetransmissionSenderIssue issue) {
+    auto message = std::move(issue.message);
+    if (issue.native_code != 0) {
+        message += " (native code " + std::to_string(issue.native_code) + ')';
+    }
+    return worker_issue(operation, std::move(message));
 }
 
 [[nodiscard]] std::string canonical_name(const std::uint32_t ssrc) {
@@ -70,12 +82,16 @@ struct DefaultPublisherRtcpWorker::Impl {
     Impl(PublisherRtcpWorkerConfig config,
          std::unique_ptr<common::rtcp::Transport> transport,
          std::shared_ptr<RtpSenderState> sender_state,
+         std::unique_ptr<contracts::output::RtpRetransmissionSender>
+             retransmission_sender,
          std::shared_ptr<contracts::Notifier> notifier)
         : config{std::move(config)},
           transport{std::move(transport)},
           sender_state{std::move(sender_state)},
+          retransmission_sender{std::move(retransmission_sender)},
           notifier{std::move(notifier)} {
-        if (!this->transport || !this->sender_state || !this->notifier) {
+        if (!this->transport || !this->sender_state ||
+            !this->retransmission_sender || !this->notifier) {
             throw std::invalid_argument{
                 "publisher RTCP worker dependencies must not be null"};
         }
@@ -95,11 +111,16 @@ struct DefaultPublisherRtcpWorker::Impl {
     [[nodiscard]] bool receive_once(std::chrono::milliseconds timeout);
     void process_receiver_report(const common::rtcp::ReceiverReport& report,
                                  Clock::time_point received_at);
+    [[nodiscard]] bool process_generic_nack(
+        const common::rtcp::GenericNack& nack,
+        Clock::time_point received_at);
     void fail(PublisherRtcpWorkerIssue issue) noexcept;
 
     PublisherRtcpWorkerConfig config;
     std::unique_ptr<common::rtcp::Transport> transport;
     std::shared_ptr<RtpSenderState> sender_state;
+    std::unique_ptr<contracts::output::RtpRetransmissionSender>
+        retransmission_sender;
     std::shared_ptr<contracts::Notifier> notifier;
     mutable std::mutex mutex;
     PublisherRtcpWorkerStats worker_stats;
@@ -118,10 +139,12 @@ PublisherRtcpStartResult DefaultPublisherRtcpWorker::Impl::start() {
     }
     if (config.report_interval <= std::chrono::milliseconds::zero() ||
         config.receive_poll_interval <= std::chrono::milliseconds::zero() ||
-        config.rtp_clock_rate == 0U) {
+        config.rtp_clock_rate == 0U ||
+        config.maximum_nack_sequence_requests == 0U) {
         return std::unexpected{worker_issue(
             PublisherRtcpWorkerOperation::Control,
-            "publisher RTCP intervals and RTP clock rate must be positive")};
+            "publisher RTCP intervals, RTP clock rate, and NACK request limit "
+            "must be positive")};
     }
 
     auto opened = transport->open(config.transport);
@@ -129,6 +152,14 @@ PublisherRtcpStartResult DefaultPublisherRtcpWorker::Impl::start() {
         return std::unexpected{transport_issue(
             PublisherRtcpWorkerOperation::OpenTransport,
             std::move(opened.error()))};
+    }
+    if (auto retransmission_opened = retransmission_sender->open();
+        !retransmission_opened) {
+        retransmission_sender->close();
+        transport->close();
+        return std::unexpected{retransmission_issue(
+            PublisherRtcpWorkerOperation::OpenRetransmissionSender,
+            std::move(retransmission_opened.error()))};
     }
     {
         std::lock_guard lock{mutex};
@@ -141,6 +172,7 @@ PublisherRtcpStartResult DefaultPublisherRtcpWorker::Impl::start() {
         thread = std::jthread{
             [this](const std::stop_token token) { run(token); }};
     } catch (const std::exception& error) {
+        retransmission_sender->close();
         transport->close();
         std::lock_guard lock{mutex};
         worker_stats.state = PublisherRtcpWorkerState::Idle;
@@ -156,6 +188,7 @@ void DefaultPublisherRtcpWorker::Impl::stop() noexcept {
         thread.join();
     }
     transport->close();
+    retransmission_sender->close();
     std::lock_guard lock{mutex};
     worker_stats.state = PublisherRtcpWorkerState::Idle;
 }
@@ -261,8 +294,83 @@ bool DefaultPublisherRtcpWorker::Impl::receive_once(
         if (report != nullptr) {
             process_receiver_report(*report, (*received)->received_at);
         }
+        const auto* nack = std::get_if<common::rtcp::GenericNack>(&packet);
+        if (nack != nullptr &&
+            !process_generic_nack(*nack, (*received)->received_at)) {
+            return false;
+        }
     }
     return true;
+}
+
+bool DefaultPublisherRtcpWorker::Impl::process_generic_nack(
+    const common::rtcp::GenericNack& nack,
+    const Clock::time_point received_at) {
+    {
+        std::lock_guard lock{mutex};
+        ++worker_stats.generic_nack_packets_received;
+    }
+    const auto snapshot = sender_state->snapshot();
+    if (!snapshot || nack.media_source_ssrc != snapshot->ssrc) {
+        std::lock_guard lock{mutex};
+        ++worker_stats.ignored_generic_nack_packets;
+        return true;
+    }
+
+    try {
+        const auto expanded =
+            common::rtcp::expand_generic_nack_blocks(nack.feedback);
+        std::vector<std::uint16_t> requested;
+        requested.reserve(std::min(expanded.size(),
+                                   config.maximum_nack_sequence_requests));
+        for (const auto sequence : expanded) {
+            if (std::find(requested.begin(), requested.end(), sequence) !=
+                requested.end()) {
+                continue;
+            }
+            if (requested.size() == config.maximum_nack_sequence_requests) {
+                break;
+            }
+            requested.push_back(sequence);
+        }
+        {
+            std::lock_guard lock{mutex};
+            worker_stats.nack_sequence_requests_received += requested.size();
+            worker_stats.nack_sequence_requests_ignored +=
+                expanded.size() - requested.size();
+        }
+        for (const auto sequence : requested) {
+            auto datagram = sender_state->find_retransmission_packet(
+                sequence, received_at);
+            if (!datagram) {
+                std::lock_guard lock{mutex};
+                ++worker_stats.retransmission_cache_misses;
+                continue;
+            }
+            {
+                std::lock_guard lock{mutex};
+                ++worker_stats.retransmission_cache_hits;
+            }
+            if (auto sent = retransmission_sender->send(*datagram); !sent) {
+                fail(retransmission_issue(
+                    PublisherRtcpWorkerOperation::Retransmit,
+                    std::move(sent.error())));
+                return false;
+            }
+            std::lock_guard lock{mutex};
+            ++worker_stats.retransmitted_packets;
+            worker_stats.retransmitted_bytes += datagram->size();
+        }
+        return true;
+    } catch (const std::exception& error) {
+        fail(worker_issue(PublisherRtcpWorkerOperation::Internal,
+                          error.what()));
+        return false;
+    } catch (...) {
+        fail(worker_issue(PublisherRtcpWorkerOperation::Internal,
+                          "unknown error while processing Generic NACK"));
+        return false;
+    }
 }
 
 void DefaultPublisherRtcpWorker::Impl::process_receiver_report(
@@ -321,10 +429,12 @@ DefaultPublisherRtcpWorker::DefaultPublisherRtcpWorker(
     PublisherRtcpWorkerConfig config,
     std::unique_ptr<common::rtcp::Transport> transport,
     std::shared_ptr<RtpSenderState> sender_state,
+    std::unique_ptr<contracts::output::RtpRetransmissionSender>
+        retransmission_sender,
     std::shared_ptr<contracts::Notifier> notifier)
     : impl_{std::make_unique<Impl>(
           std::move(config), std::move(transport), std::move(sender_state),
-          std::move(notifier))} {}
+          std::move(retransmission_sender), std::move(notifier))} {}
 
 DefaultPublisherRtcpWorker::~DefaultPublisherRtcpWorker() = default;
 

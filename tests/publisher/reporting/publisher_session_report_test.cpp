@@ -32,6 +32,8 @@ reporting::PublisherSessionReport sample_report() {
     report.config.rtcp->transport.bind_port = 5005;
     report.config.rtcp->transport.peer_address = "127.0.0.1";
     report.config.rtcp->transport.peer_port = 5007;
+    report.config.rtcp->receive_poll_interval = 7ms;
+    report.config.rtcp->maximum_nack_sequence_requests = 128;
     report.stats.session_id = 9;
     report.stats.started_sessions = 1;
     report.stats.completed_sessions = 1;
@@ -50,6 +52,13 @@ reporting::PublisherSessionReport sample_report() {
         "127.0.0.1", 5005, 1'500, 262'144};
     report.stats.rtcp->sender_reports_sent = 12;
     report.stats.rtcp->receiver_reports_received = 11;
+    report.stats.rtcp->generic_nack_packets_received = 8;
+    report.stats.rtcp->ignored_generic_nack_packets = 1;
+    report.stats.rtcp->nack_sequence_requests_received = 10;
+    report.stats.rtcp->retransmission_cache_hits = 7;
+    report.stats.rtcp->retransmission_cache_misses = 3;
+    report.stats.rtcp->retransmitted_packets = 7;
+    report.stats.rtcp->retransmitted_bytes = 8'400;
     report.stats.rtcp->rtt_samples = 10;
     report.stats.rtcp->current_rtt = 17ms;
     report.stats.rtcp->reported_fraction_lost = 13;
@@ -77,9 +86,19 @@ void renders_baseline_fields() {
             "publisher report must expose media and RTP baseline fields");
     require(json.find("\"bind_port\": 5005") != std::string::npos &&
                 json.find("\"peer_port\": 5007") != std::string::npos &&
+                json.find("\"receive_poll_interval_ms\": 7") !=
+                    std::string::npos &&
+                json.find("\"maximum_nack_sequence_requests\": 128") !=
+                    std::string::npos &&
                 json.find("\"sender_reports_sent\": 12") !=
                     std::string::npos &&
                 json.find("\"receiver_reports_received\": 11") !=
+                    std::string::npos &&
+                json.find("\"generic_nack_packets_received\": 8") !=
+                    std::string::npos &&
+                json.find("\"retransmission_cache_hits\": 7") !=
+                    std::string::npos &&
+                json.find("\"retransmitted_packets\": 7") !=
                     std::string::npos &&
                 json.find("\"current_rtt_ms\": 17") !=
                     std::string::npos &&
