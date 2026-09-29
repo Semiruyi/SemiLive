@@ -14,7 +14,7 @@
 namespace semilive::receiver::domain {
 
 struct RtpReorderConfig {
-    std::size_t maximum_buffered_packets = 64;
+    std::size_t maximum_buffered_packets = 512;
     std::chrono::milliseconds maximum_hold_time{50};
 };
 

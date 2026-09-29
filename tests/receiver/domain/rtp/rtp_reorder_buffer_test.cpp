@@ -56,6 +56,15 @@ void require(const bool condition, const std::string_view message) {
     return *value;
 }
 
+void defaults_cover_large_fragmented_access_units() {
+    const domain::RtpReorderConfig config;
+    require(config.maximum_buffered_packets == 512,
+            "default reorder capacity must cover a large fragmented access "
+            "unit while NACK recovery is in flight");
+    require(config.maximum_hold_time == 50ms,
+            "increasing capacity must not extend the loss deadline");
+}
+
 void emits_in_order_packets_immediately() {
     domain::RtpReorderBuffer buffer;
 
@@ -290,6 +299,7 @@ void rejects_invalid_bounds() {
 
 int main() {
     try {
+        defaults_cover_large_fragmented_access_units();
         emits_in_order_packets_immediately();
         buffers_future_packets_and_drains_when_the_gap_arrives();
         timeout_confirms_loss_and_releases_the_nearest_packet();
