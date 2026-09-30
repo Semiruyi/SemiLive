@@ -476,8 +476,9 @@ void DefaultVideoOutputWorker::fail_session(
         ++stats_.fatal_failures;
         stats_.last_issue = issue;
     }
-    complete_drain_waiters();
+    // A draining stop must observe the failure notification before returning.
     notify_failure(issue);
+    complete_drain_waiters();
 }
 
 void DefaultVideoOutputWorker::notify_failure(
