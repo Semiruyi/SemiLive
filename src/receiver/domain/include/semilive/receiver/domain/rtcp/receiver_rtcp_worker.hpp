@@ -46,6 +46,8 @@ struct ReceiverRtcpWorkerStats {
     std::uint64_t receiver_reports_sent = 0;
     std::uint64_t generic_nack_packets_sent = 0;
     std::uint64_t nack_sequence_requests_sent = 0;
+    std::uint64_t pli_packets_sent = 0;
+    std::uint64_t pli_requests_coalesced = 0;
     std::uint64_t invalid_packets = 0;
     std::uint64_t ignored_sender_reports = 0;
     std::optional<std::uint8_t> current_fraction_lost;
@@ -71,6 +73,9 @@ public:
     ReceiverRtcpWorker& operator=(ReceiverRtcpWorker&&) = delete;
 
     [[nodiscard]] virtual ReceiverRtcpStartResult start() = 0;
+    // A single pending request is retained until the RTCP thread sends it.
+    [[nodiscard]] virtual bool request_pli(
+        std::uint32_t media_source_ssrc) noexcept = 0;
     virtual void stop() noexcept = 0;
     [[nodiscard]] virtual ReceiverRtcpWorkerState state() const noexcept = 0;
     [[nodiscard]] virtual ReceiverRtcpWorkerStats stats() const noexcept = 0;

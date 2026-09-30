@@ -114,6 +114,8 @@ struct DefaultPublisherRtcpWorker::Impl {
     [[nodiscard]] bool process_generic_nack(
         const common::rtcp::GenericNack& nack,
         Clock::time_point received_at);
+    [[nodiscard]] bool process_pli(
+        const common::rtcp::PictureLossIndication& pli);
     void fail(PublisherRtcpWorkerIssue issue) noexcept;
 
     PublisherRtcpWorkerConfig config;
@@ -299,8 +301,39 @@ bool DefaultPublisherRtcpWorker::Impl::receive_once(
             !process_generic_nack(*nack, (*received)->received_at)) {
             return false;
         }
+        const auto* pli =
+            std::get_if<common::rtcp::PictureLossIndication>(&packet);
+        if (pli != nullptr && !process_pli(*pli)) {
+            return false;
+        }
     }
     return true;
+}
+
+bool DefaultPublisherRtcpWorker::Impl::process_pli(
+    const common::rtcp::PictureLossIndication& pli) {
+    const auto snapshot = sender_state->snapshot();
+    {
+        std::lock_guard lock{mutex};
+        ++worker_stats.pli_packets_received;
+        if (!snapshot || pli.media_source_ssrc != snapshot->ssrc) {
+            ++worker_stats.ignored_pli_packets;
+            return true;
+        }
+    }
+    try {
+        static_cast<void>(notifier->send(PublisherPictureLossIndicationReceived{
+            pli.sender_ssrc, pli.media_source_ssrc}));
+        return true;
+    } catch (const std::exception& error) {
+        fail(worker_issue(PublisherRtcpWorkerOperation::Internal,
+                          error.what()));
+        return false;
+    } catch (...) {
+        fail(worker_issue(PublisherRtcpWorkerOperation::Internal,
+                          "unknown error while reporting PLI"));
+        return false;
+    }
 }
 
 bool DefaultPublisherRtcpWorker::Impl::process_generic_nack(

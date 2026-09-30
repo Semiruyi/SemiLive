@@ -21,6 +21,7 @@ constexpr std::size_t receiver_report_fixed_size = 8;
 constexpr std::size_t feedback_fixed_size = 12;
 constexpr std::size_t generic_nack_block_size = 4;
 constexpr std::uint8_t generic_nack_format = 1;
+constexpr std::uint8_t picture_loss_indication_format = 1;
 constexpr std::int32_t minimum_signed_24 = -8'388'608;
 constexpr std::int32_t maximum_signed_24 = 8'388'607;
 constexpr std::size_t maximum_count = 31;
@@ -273,6 +274,19 @@ void append_report(std::vector<std::byte>& bytes,
     return bytes;
 }
 
+[[nodiscard]] SerializeResult serialize_picture_loss_indication(
+    const PictureLossIndication& pli) {
+    std::vector<std::byte> bytes;
+    bytes.reserve(feedback_fixed_size);
+    append_header(
+        bytes, picture_loss_indication_format,
+        static_cast<std::uint8_t>(PacketType::PayloadSpecificFeedback),
+        feedback_fixed_size);
+    append_u32(bytes, pli.sender_ssrc);
+    append_u32(bytes, pli.media_source_ssrc);
+    return bytes;
+}
+
 [[nodiscard]] SerializeResult serialize_unknown(
     const UnknownPacket& packet) {
     if (packet.count > maximum_count) {
@@ -290,7 +304,10 @@ void append_report(std::vector<std::byte>& bytes,
             static_cast<std::uint8_t>(PacketType::SourceDescription) ||
         (packet.packet_type ==
              static_cast<std::uint8_t>(PacketType::TransportLayerFeedback) &&
-         packet.count == generic_nack_format)) {
+         packet.count == generic_nack_format) ||
+        (packet.packet_type ==
+             static_cast<std::uint8_t>(PacketType::PayloadSpecificFeedback) &&
+         packet.count == picture_loss_indication_format)) {
         return std::unexpected{
             "an unknown RTCP packet cannot use a supported packet type"};
     }
@@ -460,6 +477,19 @@ parse_source_description(const std::span<const std::byte> bytes,
     return nack;
 }
 
+[[nodiscard]] std::expected<PictureLossIndication, ParseError>
+parse_picture_loss_indication(const std::span<const std::byte> bytes,
+                              const std::size_t packet_offset,
+                              const std::size_t body_end) {
+    if (body_end - packet_offset != feedback_fixed_size) {
+        return std::unexpected{parse_error(
+            ParseErrorCode::InvalidPacketBody, packet_offset,
+            "RTCP PLI must contain exactly two SSRC fields")};
+    }
+    return PictureLossIndication{read_u32(bytes, packet_offset + 4U),
+                                 read_u32(bytes, packet_offset + 8U)};
+}
+
 }  // namespace
 
 ParseResult parse_compound_packet(const std::span<const std::byte> bytes) {
@@ -546,6 +576,15 @@ ParseResult parse_compound_packet(const std::span<const std::byte> bytes) {
                 return std::unexpected{std::move(nack.error())};
             }
             compound.packets.emplace_back(std::move(*nack));
+        } else if (
+            packet_type == static_cast<std::uint8_t>(
+                               PacketType::PayloadSpecificFeedback) &&
+            count == picture_loss_indication_format) {
+            auto pli = parse_picture_loss_indication(bytes, cursor, body_end);
+            if (!pli) {
+                return std::unexpected{std::move(pli.error())};
+            }
+            compound.packets.emplace_back(std::move(*pli));
         } else {
             UnknownPacket unknown;
             unknown.packet_type = packet_type;
@@ -581,6 +620,9 @@ SerializeResult serialize_compound_packet(const CompoundPacket& compound) {
                     return serialize_source_description(value);
                 } else if constexpr (std::is_same_v<Value, GenericNack>) {
                     return serialize_generic_nack(value);
+                } else if constexpr (std::is_same_v<Value,
+                                                    PictureLossIndication>) {
+                    return serialize_picture_loss_indication(value);
                 } else {
                     return serialize_unknown(value);
                 }

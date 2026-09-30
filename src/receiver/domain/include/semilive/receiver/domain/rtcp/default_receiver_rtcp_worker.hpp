@@ -25,6 +25,8 @@ public:
     DefaultReceiverRtcpWorker& operator=(DefaultReceiverRtcpWorker&&) = delete;
 
     [[nodiscard]] ReceiverRtcpStartResult start() override;
+    [[nodiscard]] bool request_pli(
+        std::uint32_t media_source_ssrc) noexcept override;
     void stop() noexcept override;
     [[nodiscard]] ReceiverRtcpWorkerState state() const noexcept override;
     [[nodiscard]] ReceiverRtcpWorkerStats stats() const noexcept override;

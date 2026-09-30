@@ -76,6 +76,7 @@ struct DefaultReceiverRtcpWorker::Impl {
     }
 
     [[nodiscard]] ReceiverRtcpStartResult start();
+    [[nodiscard]] bool request_pli(std::uint32_t media_source_ssrc) noexcept;
     void stop() noexcept;
     [[nodiscard]] ReceiverRtcpWorkerState state() const noexcept;
     [[nodiscard]] ReceiverRtcpWorkerStats stats() const noexcept;
@@ -83,6 +84,7 @@ struct DefaultReceiverRtcpWorker::Impl {
     void run(std::stop_token stop_token) noexcept;
     [[nodiscard]] bool send_receiver_report(Clock::time_point now);
     [[nodiscard]] bool send_due_nacks(Clock::time_point now);
+    [[nodiscard]] bool send_pending_pli();
     [[nodiscard]] bool receive_once(std::chrono::milliseconds timeout);
     void process_sender_report(const common::rtcp::SenderReport& report,
                                Clock::time_point received_at);
@@ -97,6 +99,7 @@ struct DefaultReceiverRtcpWorker::Impl {
     std::uint32_t local_ssrc = 0;
     std::optional<std::uint32_t> last_sr;
     std::optional<Clock::time_point> last_sr_received_at;
+    std::optional<std::uint32_t> pending_pli_source_ssrc;
     std::jthread thread;
 };
 
@@ -136,6 +139,7 @@ ReceiverRtcpStartResult DefaultReceiverRtcpWorker::Impl::start() {
         worker_stats = {};
         worker_stats.state = ReceiverRtcpWorkerState::Running;
         worker_stats.transport = *opened;
+        pending_pli_source_ssrc.reset();
     }
     try {
         thread = std::jthread{
@@ -158,6 +162,24 @@ void DefaultReceiverRtcpWorker::Impl::stop() noexcept {
     transport->close();
     std::lock_guard lock{mutex};
     worker_stats.state = ReceiverRtcpWorkerState::Idle;
+    pending_pli_source_ssrc.reset();
+}
+
+bool DefaultReceiverRtcpWorker::Impl::request_pli(
+    const std::uint32_t media_source_ssrc) noexcept {
+    std::lock_guard lock{mutex};
+    if (worker_stats.state != ReceiverRtcpWorkerState::Running) {
+        return false;
+    }
+    if (pending_pli_source_ssrc) {
+        if (*pending_pli_source_ssrc != media_source_ssrc) {
+            return false;
+        }
+        ++worker_stats.pli_requests_coalesced;
+        return true;
+    }
+    pending_pli_source_ssrc = media_source_ssrc;
+    return true;
 }
 
 ReceiverRtcpWorkerState
@@ -190,12 +212,52 @@ void DefaultReceiverRtcpWorker::Impl::run(
         if (!send_due_nacks(now)) {
             return;
         }
+        if (!send_pending_pli()) {
+            return;
+        }
         const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(
             std::max(Clock::duration::zero(), next_report - Clock::now()));
         const auto timeout = std::min(config.receive_poll_interval, remaining);
         if (!receive_once(timeout)) {
             return;
         }
+    }
+}
+
+bool DefaultReceiverRtcpWorker::Impl::send_pending_pli() {
+    std::optional<std::uint32_t> source_ssrc;
+    {
+        std::lock_guard lock{mutex};
+        source_ssrc = std::exchange(pending_pli_source_ssrc, std::nullopt);
+    }
+    if (!source_ssrc) {
+        return true;
+    }
+    try {
+        const common::rtcp::CompoundPacket compound{{
+            common::rtcp::PictureLossIndication{local_ssrc, *source_ssrc}}};
+        auto serialized = common::rtcp::serialize_compound_packet(compound);
+        if (!serialized) {
+            fail(worker_issue(ReceiverRtcpWorkerOperation::Serialize,
+                              std::move(serialized.error())));
+            return false;
+        }
+        if (auto sent = transport->send(*serialized); !sent) {
+            fail(transport_issue(ReceiverRtcpWorkerOperation::Send,
+                                 std::move(sent.error())));
+            return false;
+        }
+        std::lock_guard lock{mutex};
+        ++worker_stats.pli_packets_sent;
+        return true;
+    } catch (const std::exception& error) {
+        fail(worker_issue(ReceiverRtcpWorkerOperation::Internal,
+                          error.what()));
+        return false;
+    } catch (...) {
+        fail(worker_issue(ReceiverRtcpWorkerOperation::Internal,
+                          "unknown error while sending PLI"));
+        return false;
     }
 }
 
@@ -343,6 +405,11 @@ DefaultReceiverRtcpWorker::~DefaultReceiverRtcpWorker() = default;
 
 ReceiverRtcpStartResult DefaultReceiverRtcpWorker::start() {
     return impl_->start();
+}
+
+bool DefaultReceiverRtcpWorker::request_pli(
+    const std::uint32_t media_source_ssrc) noexcept {
+    return impl_->request_pli(media_source_ssrc);
 }
 
 void DefaultReceiverRtcpWorker::stop() noexcept {

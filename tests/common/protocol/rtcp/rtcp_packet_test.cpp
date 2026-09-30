@@ -154,6 +154,32 @@ void serializes_and_parses_generic_nack_network_bytes() {
             "Generic NACK fields were not preserved");
 }
 
+void serializes_and_parses_pli_network_bytes() {
+    const rtcp::PictureLossIndication pli{0x1122'3344U, 0x5566'7788U};
+    const auto serialized = rtcp::serialize_compound_packet({{pli}});
+    const auto expected = bytes({
+        0x81, 0xce, 0x00, 0x02,
+        0x11, 0x22, 0x33, 0x44,
+        0x55, 0x66, 0x77, 0x88,
+    });
+    require(serialized.has_value() && *serialized == expected,
+            "PLI network representation is incorrect");
+    const auto parsed = rtcp::parse_compound_packet(expected);
+    require(parsed.has_value() && parsed->packets.size() == 1U &&
+                std::get_if<rtcp::PictureLossIndication>(
+                    &parsed->packets.front()) != nullptr &&
+                std::get<rtcp::PictureLossIndication>(
+                    parsed->packets.front()) == pli,
+            "PLI fields were not preserved");
+
+    const rtcp::CompoundPacket mixed{{rtcp::ReceiverReport{}, pli,
+                                      rtcp::GenericNack{1U, 2U, {{3U, 0U}}}}};
+    const auto mixed_bytes = rtcp::serialize_compound_packet(mixed);
+    require(mixed_bytes.has_value() &&
+                rtcp::parse_compound_packet(*mixed_bytes) == mixed,
+            "PLI broke compound packet traversal");
+}
+
 void packs_generic_nack_sequences_across_wraparound() {
     const std::vector<std::uint16_t> lost{
         65'534U, 65'535U, 0U, 2U, 2U, 20U,
@@ -219,6 +245,36 @@ void validates_headers_lengths_padding_and_report_ranges() {
                     rtcp::ParseErrorCode::InvalidPacketBody,
             "Generic NACK without an FCI block was accepted");
 
+    const auto truncated_pli = rtcp::parse_compound_packet(bytes({
+        0x81, 0xce, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x01,
+    }));
+    require(!truncated_pli &&
+                truncated_pli.error().code ==
+                    rtcp::ParseErrorCode::InvalidPacketBody,
+            "PLI without media SSRC was accepted");
+    const auto oversized_pli = rtcp::parse_compound_packet(bytes({
+        0x81, 0xce, 0x00, 0x03,
+        0x00, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x02,
+        0x00, 0x00, 0x00, 0x03,
+    }));
+    require(!oversized_pli &&
+                oversized_pli.error().code ==
+                    rtcp::ParseErrorCode::InvalidPacketBody,
+            "PLI with an FCI body was accepted");
+    const rtcp::UnknownPacket disguised_pli{
+        static_cast<std::uint8_t>(rtcp::PacketType::PayloadSpecificFeedback),
+        1U, bytes({0x00, 0x00, 0x00, 0x01})};
+    require(!rtcp::serialize_compound_packet({{disguised_pli}}),
+            "unknown packet accepted the supported PLI format");
+    const rtcp::UnknownPacket other_payload_feedback{
+        static_cast<std::uint8_t>(rtcp::PacketType::PayloadSpecificFeedback),
+        2U, bytes({0x00, 0x00, 0x00, 0x01})};
+    require(rtcp::serialize_compound_packet({{other_payload_feedback}})
+                .has_value(),
+            "unsupported payload feedback format was not preserved");
+
     const rtcp::UnknownPacket other_feedback_format{
         static_cast<std::uint8_t>(rtcp::PacketType::TransportLayerFeedback),
         2U,
@@ -262,6 +318,7 @@ int main() {
         preserves_receiver_report_fields_and_signed_loss();
         skips_unknown_packet_types_without_losing_boundaries();
         serializes_and_parses_generic_nack_network_bytes();
+        serializes_and_parses_pli_network_bytes();
         packs_generic_nack_sequences_across_wraparound();
         validates_headers_lengths_padding_and_report_ranges();
         converts_ntp_timestamps_and_compact_durations();

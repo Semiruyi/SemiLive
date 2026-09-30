@@ -1,11 +1,13 @@
 #include <semilive/common/rtcp/rtcp_packet.hpp>
 #include <semilive/common/rtcp/ntp_time.hpp>
 #include <semilive/publisher/domain/rtcp/default_publisher_rtcp_worker.hpp>
+#include <semilive/publisher/domain/rtcp/publisher_rtcp_worker_events.hpp>
 #include <semilive/publisher/domain/rtp/rtp_sender_state.hpp>
 #include <semilive/publisher/contracts/output/rtp_retransmission_sender.hpp>
 
 #include "publisher/support/notifier/synchronous_notifier.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -280,6 +282,56 @@ void retransmits_cached_rtp_for_matching_generic_nacks() {
     worker.stop();
 }
 
+void reports_matching_picture_loss_indications_once() {
+    auto sender_state = std::make_shared<domain::RtpSenderState>();
+    sender_state->begin_session(0x1122'3344U);
+    auto notifier = std::make_shared<SynchronousNotifier>();
+    std::atomic<unsigned> events{0U};
+    auto subscription = notifier->subscribe<
+        domain::PublisherPictureLossIndicationReceived>(
+        [&events](const domain::PublisherPictureLossIndicationReceived& event) {
+            if (event.sender_ssrc == 0xaabb'ccddU &&
+                event.media_source_ssrc == 0x1122'3344U) {
+                events.fetch_add(1U);
+            }
+        });
+    auto transport = std::make_unique<FakeTransport>();
+    auto* transport_view = transport.get();
+    domain::PublisherRtcpWorkerConfig config;
+    config.transport.peer_address = "127.0.0.1";
+    config.transport.peer_port = 5007;
+    config.report_interval = 1s;
+    config.receive_poll_interval = 2ms;
+    domain::DefaultPublisherRtcpWorker worker{
+        config, std::move(transport), sender_state,
+        std::make_unique<FakeRetransmissionSender>(), notifier};
+    require(worker.start().has_value(),
+            "publisher RTCP worker did not start for PLI test");
+
+    const auto valid = common_rtcp::serialize_compound_packet(
+        {{common_rtcp::PictureLossIndication{0xaabb'ccddU,
+                                             0x1122'3344U}}});
+    const auto wrong = common_rtcp::serialize_compound_packet(
+        {{common_rtcp::PictureLossIndication{0xaabb'ccddU,
+                                             0x5566'7788U}}});
+    require(valid.has_value() && wrong.has_value(),
+            "test PLI did not serialize");
+    transport_view->inject(*valid);
+    transport_view->inject(*wrong);
+    const auto deadline = std::chrono::steady_clock::now() + 500ms;
+    while (worker.stats().pli_packets_received < 2U &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    worker.stop();
+    const auto stats = worker.stats();
+    require(stats.pli_packets_received == 2U &&
+                stats.ignored_pli_packets == 1U &&
+                events.load() == 1U,
+            "publisher did not filter and report PLI exactly once");
+    static_cast<void>(subscription->unsubscribe());
+}
+
 void sender_state_is_session_scoped() {
     domain::RtpSenderState state;
     state.begin_session(9U);
@@ -307,6 +359,7 @@ int main() {
     try {
         sends_sr_and_consumes_matching_rr();
         retransmits_cached_rtp_for_matching_generic_nacks();
+        reports_matching_picture_loss_indications_once();
         sender_state_is_session_scoped();
         std::cout << "publisher RTCP worker tests passed\n";
         return EXIT_SUCCESS;

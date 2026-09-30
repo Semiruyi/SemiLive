@@ -80,6 +80,13 @@ struct GenericNack {
     bool operator==(const GenericNack&) const = default;
 };
 
+struct PictureLossIndication {
+    std::uint32_t sender_ssrc = 0;
+    std::uint32_t media_source_ssrc = 0;
+
+    bool operator==(const PictureLossIndication&) const = default;
+};
+
 struct UnknownPacket {
     std::uint8_t packet_type = 0;
     std::uint8_t count = 0;
@@ -89,7 +96,7 @@ struct UnknownPacket {
 };
 
 using Packet = std::variant<SenderReport, ReceiverReport, SourceDescription,
-                            GenericNack, UnknownPacket>;
+                            GenericNack, PictureLossIndication, UnknownPacket>;
 
 struct CompoundPacket {
     std::vector<Packet> packets;

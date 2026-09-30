@@ -52,6 +52,8 @@ struct PublisherRtcpWorkerStats {
     std::uint64_t receiver_reports_received = 0;
     std::uint64_t generic_nack_packets_received = 0;
     std::uint64_t ignored_generic_nack_packets = 0;
+    std::uint64_t pli_packets_received = 0;
+    std::uint64_t ignored_pli_packets = 0;
     std::uint64_t nack_sequence_requests_received = 0;
     std::uint64_t nack_sequence_requests_ignored = 0;
     std::uint64_t retransmission_cache_hits = 0;

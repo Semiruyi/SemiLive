@@ -222,12 +222,47 @@ void sends_due_generic_nacks_and_retries_only_missing_packets() {
     worker.stop();
 }
 
+void sends_explicit_picture_loss_indication() {
+    auto transport = std::make_unique<FakeTransport>();
+    auto* transport_view = transport.get();
+    domain::ReceiverRtcpWorkerConfig config;
+    config.transport.peer_address = "127.0.0.1";
+    config.transport.peer_port = 5005;
+    config.report_interval = 1s;
+    config.receive_poll_interval = 2ms;
+    config.local_ssrc = 0xaabb'ccddU;
+    domain::DefaultReceiverRtcpWorker worker{
+        config, std::move(transport),
+        std::make_shared<domain::RtpReceptionStatistics>(),
+        std::make_shared<domain::RtpMissingTracker>()};
+
+    require(!worker.request_pli(0x1122'3344U),
+            "idle RTCP worker accepted a PLI request");
+    require(worker.start().has_value(), "receiver RTCP worker did not start");
+    require(worker.request_pli(0x1122'3344U),
+            "running RTCP worker rejected a PLI request");
+    const auto sent = transport_view->wait_for_sent(1U);
+    const auto parsed = common_rtcp::parse_compound_packet(sent);
+    require(parsed.has_value() && parsed->packets.size() == 1U,
+            "receiver PLI did not parse");
+    const auto* pli = std::get_if<common_rtcp::PictureLossIndication>(
+        &parsed->packets.front());
+    require(pli != nullptr && pli->sender_ssrc == 0xaabb'ccddU &&
+                pli->media_source_ssrc == 0x1122'3344U &&
+                worker.stats().pli_packets_sent == 1U,
+            "receiver did not send the requested PLI");
+    worker.stop();
+    require(!worker.request_pli(0x1122'3344U),
+            "stopped RTCP worker accepted a PLI request");
+}
+
 }  // namespace
 
 int main() {
     try {
         sends_rr_and_tracks_the_last_sender_report();
         sends_due_generic_nacks_and_retries_only_missing_packets();
+        sends_explicit_picture_loss_indication();
         std::cout << "receiver RTCP worker tests passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
