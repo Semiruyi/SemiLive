@@ -208,12 +208,16 @@ RtpUdpVideoOutputBackend::Impl::consume(
 
     std::optional<detail::UdpSocketIssue> send_issue;
     std::uint64_t sent_datagrams = 0;
+    std::int64_t first_send = 0;
+    std::int64_t last_send = 0;
     auto packetized = packetizer->packetize(
         access_unit.annex_b, access_unit.presentation_time, session,
-        [this, &send_issue, &sent_datagrams](
+        [this, &send_issue, &sent_datagrams, &first_send, &last_send](
             const std::span<const std::byte> datagram)
             -> detail::RtpDatagramEmitResult {
+            if (sent_datagrams == 0) first_send = common::measurement::latency_ticks();
             auto sent = socket.send(datagram);
+            last_send = common::measurement::latency_ticks();
             if (!sent) {
                 send_issue = std::move(sent.error());
                 return std::unexpected{send_issue->message};
@@ -241,6 +245,12 @@ RtpUdpVideoOutputBackend::Impl::consume(
                                      native_code, std::move(message))};
     }
 
+    common::measurement::record_latency({
+        .ssrc = session.ssrc, .rtp_timestamp = packetized->rtp_timestamp,
+        .frame_id = access_unit.source_sequence, .timing = access_unit.timing,
+        .first_send = first_send, .last_send_complete = last_send,
+        .au_bytes = access_unit.annex_b.size(), .packet_count = packetized->emitted_datagrams,
+        .key_frame = access_unit.key_frame});
     return contracts::output::VideoOutputReceipt{
         packetized->emitted_datagrams, packetized->emitted_bytes};
 }

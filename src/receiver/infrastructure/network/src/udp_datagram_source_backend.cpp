@@ -1,4 +1,5 @@
 #include <semilive/receiver/infrastructure/network/udp_datagram_source_backend.hpp>
+#include <semilive/common/measurement/latency_trace.hpp>
 
 #include <algorithm>
 #include <cerrno>
@@ -421,11 +422,12 @@ UdpDatagramSourceBackend::Impl::receive_for(
         if (received_size > maximum_datagram_bytes) {
             continue;
         }
+        const auto measurement_received = common::measurement::latency_ticks();
         const auto received_end = receive_buffer.begin() +
                                   static_cast<std::ptrdiff_t>(received_size);
         std::vector<std::byte> bytes(receive_buffer.begin(), received_end);
         return contract::DatagramSourceObservation{model::UdpDatagram{
-            std::move(bytes), Clock::now()}};
+            std::move(bytes), Clock::now(), measurement_received}};
     }
 
     return contract::DatagramSourceObservation{

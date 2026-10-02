@@ -65,6 +65,7 @@ model::CapturedVideoFrame captured_frame(
         presentation_time,
         std::chrono::steady_clock::time_point{
             std::chrono::milliseconds{static_cast<std::int64_t>(sequence * 7U)}},
+        {.capture = static_cast<std::int64_t>(sequence * 13U)},
     };
 }
 
@@ -176,7 +177,8 @@ void dimension_changes_and_gapped_pts_preserve_metadata() {
                 "each backend output must own Annex-B H.264 bytes");
         require(access_unit.presentation_time == source.presentation_time &&
                     access_unit.source_sequence == source.sequence &&
-                    access_unit.captured_at == source.captured_at,
+                    access_unit.captured_at == source.captured_at &&
+                    access_unit.timing.capture == source.timing.capture,
                 "access-unit metadata must match the input selected by packet PTS");
     }
     require(access_units.front().key_frame,

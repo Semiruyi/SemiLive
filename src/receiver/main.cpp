@@ -77,6 +77,8 @@ void print_help() {
            "                                  (default: 96)\n"
            "  --rtp-ssrc SSRC                 Accept only this decimal SSRC\n"
            "                                  (default: bind first source)\n"
+           "  --rtp-reorder-packets COUNT     Reorder capacity (default: 512,\n"
+           "                                  range: 1..32767)\n"
            "  --rtp-max-datagram-bytes SIZE   Maximum accepted UDP payload\n"
            "                                  (default: 65507)\n"
            "  --udp-receive-buffer-bytes SIZE Requested kernel UDP receive "
@@ -148,6 +150,7 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
     bool ssrc_set = false;
     bool maximum_datagram_set = false;
     bool receive_buffer_set = false;
+    bool reorder_packets_set = false;
     bool rtcp_bind_address_set = false;
     bool rtcp_bind_port_set = false;
     bool rtcp_peer_address_set = false;
@@ -487,6 +490,25 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
                 std::chrono::milliseconds{
                     static_cast<std::chrono::milliseconds::rep>(*value)};
             poll_interval_set = true;
+            continue;
+        }
+
+        if (argument == "--rtp-reorder-packets") {
+            if (reorder_packets_set) {
+                return std::unexpected{
+                    "--rtp-reorder-packets may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{"--rtp-reorder-packets requires a value"};
+            }
+            const auto value = parse_unsigned(argv[index]);
+            if (!value || *value == 0 || *value >= 32768) {
+                return std::unexpected{
+                    "--rtp-reorder-packets requires an integer in 1..32767"};
+            }
+            options.receiver.pipeline.reorder.maximum_buffered_packets =
+                static_cast<std::size_t>(*value);
+            reorder_packets_set = true;
             continue;
         }
 

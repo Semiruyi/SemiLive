@@ -117,6 +117,7 @@ RtpPacketizationResult H264RtpPacketizer::packetize(
     const auto max_rtp_payload = config_.max_datagram_bytes - rtp_header_size;
     const auto max_fu_payload = max_rtp_payload - fu_header_size;
     RtpPacketizationReceipt receipt;
+    receipt.rtp_timestamp = timestamp;
 
     const auto emit = [&](const bool marker,
                           const std::span<const std::byte> payload)

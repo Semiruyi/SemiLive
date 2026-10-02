@@ -1,2 +1,3 @@
+add_subdirectory(measurement)
 add_subdirectory(infrastructure)
 add_subdirectory(protocol)

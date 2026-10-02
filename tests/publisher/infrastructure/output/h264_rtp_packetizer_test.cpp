@@ -129,7 +129,8 @@ void emits_single_nal_packets_with_one_marker_per_access_unit() {
     require(read_u16(datagrams[0], 2) == 65'535 &&
                 read_u16(datagrams[1], 2) == 0 && session.next_sequence == 1,
             "RTP sequence must advance continuously with 16-bit wraparound");
-    require(read_u32(datagrams[0], 4) == 0x1024feb8U &&
+    require(result->rtp_timestamp == 0x1024feb8U &&
+                read_u32(datagrams[0], 4) == 0x1024feb8U &&
                 read_u32(datagrams[1], 4) == 0x1024feb8U,
             "all packets in one AU must share its rounded 90 kHz timestamp");
     require(read_u32(datagrams[0], 8) == 0xa1b2c3d4U,

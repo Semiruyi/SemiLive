@@ -2,6 +2,30 @@ if(NOT DEFINED SEMILIVE_RECEIVER)
     message(FATAL_ERROR "SEMILIVE_RECEIVER is required")
 endif()
 
+foreach(value IN ITEMS 0 32768 -1 nope)
+    execute_process(
+        COMMAND "${SEMILIVE_RECEIVER}" --rtp-reorder-packets "${value}"
+        RESULT_VARIABLE result ERROR_VARIABLE error
+    )
+    if(result EQUAL 0 OR NOT error MATCHES "requires an integer in 1..32767")
+        message(FATAL_ERROR "receiver accepted invalid reorder capacity: ${value}: ${error}")
+    endif()
+endforeach()
+execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}" --rtp-reorder-packets
+    RESULT_VARIABLE result ERROR_VARIABLE error
+)
+if(result EQUAL 0 OR NOT error MATCHES "requires a value")
+    message(FATAL_ERROR "receiver accepted missing reorder capacity: ${error}")
+endif()
+execute_process(
+    COMMAND "${SEMILIVE_RECEIVER}" --rtp-reorder-packets 512 --rtp-reorder-packets 1024
+    RESULT_VARIABLE result ERROR_VARIABLE error
+)
+if(result EQUAL 0 OR NOT error MATCHES "may only be specified once")
+    message(FATAL_ERROR "receiver accepted duplicate reorder capacity: ${error}")
+endif()
+
 execute_process(
     COMMAND "${SEMILIVE_RECEIVER}" --version
     RESULT_VARIABLE version_result

@@ -1,0 +1,5 @@
+add_library(semilive_measurement STATIC src/latency_trace.cpp)
+add_library(SemiLive::Measurement ALIAS semilive_measurement)
+target_include_directories(semilive_measurement PUBLIC include)
+target_compile_features(semilive_measurement PUBLIC cxx_std_23)
+semilive_enable_warnings(semilive_measurement)

@@ -1,3 +1,4 @@
+# Legacy whole-session delivery runner; use run-loss-baseline.ps1 for joint metrics.
 [CmdletBinding()]
 param(
     [string]$BuildDirectory = "build/windows-debug/bin",

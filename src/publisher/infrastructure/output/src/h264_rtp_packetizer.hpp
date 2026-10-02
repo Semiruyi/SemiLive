@@ -23,6 +23,7 @@ struct RtpSessionState {
 };
 
 struct RtpPacketizationReceipt {
+    std::uint32_t rtp_timestamp = 0;
     std::uint64_t emitted_datagrams = 0;
     std::uint64_t emitted_bytes = 0;
 };

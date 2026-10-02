@@ -171,6 +171,7 @@ struct FfmpegH264EncoderBackend::Impl {
         model::MediaTime presentation_time{};
         std::uint64_t source_sequence = 0;
         std::chrono::steady_clock::time_point captured_at{};
+        common::measurement::FrameTiming timing{};
     };
 
     using AccessUnitResult =
@@ -256,6 +257,8 @@ contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::Impl::encode(
     }
 
     const auto preprocessing_started = std::chrono::steady_clock::now();
+    auto timing = frame.timing;
+    timing.encode_begin = common::measurement::latency_ticks();
     auto placement = model::calculate_video_placement(
         model::VideoDimensions{frame.image->width, frame.image->height},
         output_);
@@ -273,7 +276,7 @@ contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::Impl::encode(
 
     const auto [metadata, inserted] = metadata_by_pts_.emplace(
         *ticks, FrameMetadata{frame.presentation_time, frame.sequence,
-                              frame.captured_at});
+                              frame.captured_at, timing});
     static_cast<void>(metadata);
     if (!inserted) {
         return fail(issue(VideoEncoderOperation::ValidateInput, 0,
@@ -372,6 +375,8 @@ FfmpegH264EncoderBackend::Impl::make_access_units(
             packet.key_frame,
             frame_metadata.source_sequence,
             frame_metadata.captured_at,
+            common::measurement::FrameTiming{frame_metadata.timing.capture,
+                frame_metadata.timing.encode_begin, common::measurement::latency_ticks()},
         });
         metadata_by_pts_.erase(metadata);
         last_emitted_ticks_ = packet_ticks;

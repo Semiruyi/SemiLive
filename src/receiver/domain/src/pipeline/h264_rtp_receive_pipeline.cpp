@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <utility>
 #include <variant>
+#include <semilive/common/measurement/latency_trace.hpp>
+#include <map>
 
 namespace semilive::receiver::domain {
 namespace {
@@ -97,12 +99,18 @@ struct H264RtpReceivePipeline::Impl {
     std::uint64_t session_drops_ = 0;
     std::uint64_t timestamp_mapping_failures_ = 0;
     std::uint64_t output_access_units_ = 0;
+    struct ReceiveTiming {
+        std::int64_t first = 0, last = 0;
+        std::uint64_t packets = 0;
+    };
+    std::map<std::pair<std::uint32_t, std::uint32_t>, ReceiveTiming> receive_timings_;
 };
 
 H264RtpReceivePipelineOutputs H264RtpReceivePipeline::Impl::push(
     model::UdpDatagram datagram) {
     ++received_datagrams_;
     const auto observed_at = datagram.received_at;
+    const auto measurement_received = datagram.measurement_received;
     auto parsed = parser_.parse(std::move(datagram));
     if (!parsed) {
         ++parse_failures_;
@@ -121,6 +129,15 @@ H264RtpReceivePipelineOutputs H264RtpReceivePipeline::Impl::push(
             accepted->packet.timestamp(), accepted->packet.received_at());
     }
     const auto ssrc = accepted->packet.ssrc();
+    if (measurement_received != 0) {
+        const auto key = std::pair{ssrc, accepted->packet.timestamp()};
+        if (!receive_timings_.contains(key) && receive_timings_.size() >= 4096)
+            receive_timings_.erase(receive_timings_.begin());
+        auto& timing = receive_timings_[key];
+        if (timing.first == 0) timing.first = measurement_received;
+        timing.last = measurement_received;
+        ++timing.packets;
+    }
     const auto sequence = accepted->packet.sequence_number();
     const auto received_at = accepted->packet.received_at();
     auto events = reorder_.push(std::move(accepted->packet));
@@ -161,6 +178,7 @@ H264RtpReceivePipeline::Impl::stats() const noexcept {
 }
 
 void H264RtpReceivePipeline::Impl::reset() noexcept {
+    receive_timings_.clear();
     session_filter_.reset();
     reorder_.reset();
     depacketizer_.reset();
@@ -242,6 +260,22 @@ void H264RtpReceivePipeline::Impl::process_assembler_event(
     }
 
     ++output_access_units_;
+    const auto ready = common::measurement::latency_ticks();
+    const auto timestamp = mapped->access_unit().rtp_timestamp();
+    const auto ssrc = session_filter_.stats().bound_ssrc;
+    if (ssrc) {
+        const auto it = receive_timings_.find({*ssrc, timestamp});
+        if (it != receive_timings_.end()) {
+            common::measurement::record_latency({
+                .ssrc = it->first.first, .rtp_timestamp = timestamp,
+                .timing = {},
+                .first_receive = it->second.first, .last_receive = it->second.last,
+                .au_ready = ready, .au_bytes = mapped->access_unit().annex_b().size(),
+                .packet_count = it->second.packets,
+                .key_frame = mapped->access_unit().contains_idr()});
+            receive_timings_.erase(it);
+        }
+    }
     outputs.push_back(std::move(*mapped));
 }
 

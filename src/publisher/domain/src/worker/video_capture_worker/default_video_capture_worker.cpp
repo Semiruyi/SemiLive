@@ -373,6 +373,7 @@ DefaultVideoCaptureWorker::capture_once() noexcept {
     const auto started_at = Clock::now();
     try {
         auto result = backend_->capture_latest();
+        measurement_capture_ = common::measurement::latency_ticks();
         record_capture_time(Clock::now() - started_at);
         if (!result) {
             return std::unexpected{
@@ -466,6 +467,7 @@ DefaultVideoCaptureWorker::publish_frame(const FrameContent content) noexcept {
 
     model::CapturedVideoFrame frame{
         latest_image_, next_sequence_, next_tick_->presentation_time, Clock::now()};
+    frame.timing.capture = measurement_capture_;
     try {
         const auto pushed = sink_->try_push(std::move(frame));
         ++next_sequence_;

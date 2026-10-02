@@ -1,4 +1,5 @@
 #pragma once
+#include <semilive/common/measurement/latency_trace.hpp>
 
 #include <semilive/publisher/model/media_time.hpp>
 
@@ -15,6 +16,7 @@ struct EncodedVideoAccessUnit {
     bool key_frame = false;
     std::uint64_t source_sequence = 0;
     std::chrono::steady_clock::time_point captured_at{};
+    common::measurement::FrameTiming timing{};
 };
 
 }  // namespace semilive::publisher::model

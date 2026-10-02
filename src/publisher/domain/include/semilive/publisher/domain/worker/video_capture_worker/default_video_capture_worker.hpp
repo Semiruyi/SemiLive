@@ -143,6 +143,7 @@ private:
     std::chrono::milliseconds recovery_timeout_{5000};
     std::optional<VideoCaptureWorkerIssue> last_issue_;
     std::uint64_t next_sequence_ = 0;
+    std::int64_t measurement_capture_ = 0;
     bool backend_open_ = false;
 
     std::jthread worker_;

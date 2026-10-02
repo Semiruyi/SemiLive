@@ -1,4 +1,7 @@
-# Random-loss baseline runner
+# Legacy random-loss baseline runner
+
+For new delivery and latency experiments, use [the unified runner](README.md).
+This runner preserves historical whole-session metrics and resume support.
 
 `run-random-loss-baseline.ps1` runs the video pipeline through the deterministic UDP relay, validates the
 machine-readable reports, and writes per-run and aggregate CSV files. Without `-EnableRtcp` it records the
@@ -7,7 +10,7 @@ no-feedback baseline; with `-EnableRtcp` it enables SR/RR, Generic NACK, and ori
 Build the Windows binaries first, then run a short pilot from PowerShell:
 
 ```powershell
-./tools/weak-network/run-random-loss-baseline.ps1 `
+./tools/experiments/run-random-loss-baseline.ps1 `
   -BuildDirectory build/windows-debug/bin `
   -DurationSeconds 60 `
   -LossPercents 0,0.1,0.5,1,3,5,10 `
@@ -20,7 +23,7 @@ parameters uses the default loss rates `0,0.1,0.5,1,3,5,10` and seeds `1001,1002
 
 ```sh
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
-  -File tools/weak-network/run-random-loss-baseline.ps1 \
+  -File tools/experiments/run-random-loss-baseline.ps1 \
   -DurationSeconds 60
 ```
 
@@ -40,7 +43,7 @@ output backpressure do not contaminate the transport comparison.
 To regenerate CSV files after inspecting or copying a completed experiment:
 
 ```powershell
-./tools/weak-network/run-random-loss-baseline.ps1 `
+./tools/experiments/run-random-loss-baseline.ps1 `
   -OutputDirectory experiments/random-loss-baseline-YYYY-MM-DD-HHMMSS `
   -SummarizeOnly
 ```
@@ -66,7 +69,7 @@ produces a first frame has no inter-output stall to count, so those diagnostic f
 If a process fails during a long matrix, resume the same experiment instead of discarding completed runs:
 
 ```powershell
-./tools/weak-network/run-random-loss-baseline.ps1 `
+./tools/experiments/run-random-loss-baseline.ps1 `
   -OutputDirectory experiments/random-loss-baseline-YYYY-MM-DD-HHMMSS `
   -Resume
 ```

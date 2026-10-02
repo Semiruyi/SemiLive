@@ -9,4 +9,5 @@ target_include_directories(semilive_publisher_model PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_compile_features(semilive_publisher_model PUBLIC cxx_std_23)
+target_link_libraries(semilive_publisher_model PUBLIC SemiLive::Measurement)
 semilive_enable_warnings(semilive_publisher_model)

@@ -185,7 +185,7 @@ H.264，便于通过 ffmpeg、ffprobe 或其他标准工具交叉验证。
 构建 Windows binaries 后，在 PowerShell 中运行：
 
 ```powershell
-./tools/weak-network/run-random-loss-baseline.ps1 `
+./tools/experiments/run-random-loss-baseline.ps1 `
   -BuildDirectory build/windows-debug/bin `
   -DurationSeconds 60 `
   -LossPercents 0,0.1,0.5,1,3,5,10 `
@@ -205,9 +205,18 @@ experiments/random-loss-baseline-YYYY-MM-DD-HHMMSS/
 
 省略 `-EnableRtcp` 得到无反馈基线；启用后运行 SR/RR、Generic NACK 和重传。实验异常中断时可用
 `-OutputDirectory <原目录> -Resume` 跳过已完成样本继续执行。更多说明见
-[弱网实验工具](tools/weak-network/README.md)。
+[历史弱网实验工具](tools/experiments/legacy-random-loss.md)。该入口保留原有整段会话指标与续跑功能；
+新实验建议使用统一交付率与延迟矩阵：
+
+```powershell
+./tools/experiments/run-loss-baseline.ps1 -Python python -ReorderPackets 1024
+```
 
 ## 代码与文档导航
+
+交付率与同机 T0→T5 延迟测量见 [统一实验工具](tools/experiments/README.md)：支持直连与随机丢包 Relay，
+逐帧对齐 QPC 时间，在同一采集窗口统计交付率、按时交付率、阶段耗时及 P50/P95/P99。
+测量终点为 Receiver AU 可交付，不包含解码和显示。
 
 ```text
 src/common       RTP/RTCP 公共协议与基础设施
