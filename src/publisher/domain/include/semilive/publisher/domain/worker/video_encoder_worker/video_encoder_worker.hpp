@@ -12,6 +12,7 @@ namespace semilive::publisher::domain {
 
 struct VideoEncoderSessionConfig {
     contracts::encoder::VideoEncoderConfig encoder;
+    std::chrono::milliseconds key_frame_request_minimum_interval{500};
 };
 
 struct VideoEncoderStarted {
@@ -60,6 +61,9 @@ struct VideoEncoderWorkerStats {
     std::uint64_t submitted_access_units = 0;
     std::uint64_t pending_access_units = 0;
     std::uint64_t key_frames = 0;
+    std::uint64_t key_frame_requests_received = 0;
+    std::uint64_t key_frame_requests_coalesced = 0;
+    std::uint64_t key_frame_requests_applied = 0;
     std::uint64_t encoded_bytes = 0;
     std::uint64_t backend_calls = 0;
     std::chrono::nanoseconds total_backend_time{};

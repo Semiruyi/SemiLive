@@ -2,6 +2,7 @@
 #include <semilive/publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue.hpp>
 #include <semilive/publisher/domain/worker/video_encoder_worker/default_video_encoder_worker.hpp>
 #include <semilive/publisher/domain/worker/video_encoder_worker/video_encoder_worker_events.hpp>
+#include <semilive/publisher/domain/rtcp/publisher_rtcp_worker_events.hpp>
 #include "publisher/support/encoder/scripted_video_encoder_backend.hpp"
 #include "publisher/support/notifier/synchronous_notifier.hpp"
 
@@ -358,9 +359,57 @@ void runtime_failure_notifies_once_and_requires_stop() {
 
 }  // namespace
 
+void pli_requests_are_coalesced_and_applied_on_the_encoder_thread() {
+    auto notifier = std::make_shared<SynchronousNotifier>();
+    publisher::CapturedVideoFrameStore frames{notifier};
+    publisher::EncodedVideoAccessUnitQueue units{notifier};
+    auto backend = std::make_unique<ScriptedVideoEncoderBackend>();
+    auto* view = backend.get();
+    backend->queue_open_result(encoder_info());
+    backend->queue_open_result(encoder_info());
+    backend->queue_encode_result(batch({access_unit(1, true)}));
+    backend->queue_encode_result(batch({access_unit(2)}));
+    backend->queue_encode_result(batch({access_unit(3)}));
+    publisher::DefaultVideoEncoderWorker worker{std::move(backend), frames, units, notifier};
+    const publisher::PublisherPictureLossIndicationReceived pli{1, 2};
+    (void)notifier->send(pli);
+    require(worker.stats().key_frame_requests_received == 0, "idle worker accepted PLI");
+    publisher::VideoEncoderSessionConfig config;
+    config.key_frame_request_minimum_interval = 10s;
+    require(worker.start(config).has_value(), "worker must start");
+    for (int i = 0; i < 100; ++i) { (void)notifier->send(pli); }
+    require(worker.stats().key_frame_requests_received == 100 &&
+            worker.stats().key_frame_requests_coalesced == 99 &&
+            worker.stats().key_frame_requests_applied == 0,
+            "requests without an input frame must coalesce and remain pending");
+    (void)frames.try_push(frame(1));
+    require(wait_until([&] { return worker.stats().submitted_access_units == 1; }), "first frame missing");
+    (void)units.try_pop();
+    (void)notifier->send(pli);
+    (void)frames.try_push(frame(2));
+    require(wait_until([&] { return worker.stats().submitted_access_units == 2; }), "second frame missing");
+    (void)units.try_pop();
+    require(worker.stats().key_frame_requests_applied == 1, "cooldown did not limit requests");
+    worker.stop(publisher::VideoEncoderStopMode::Abort);
+    require(worker.start(config).has_value(), "worker must restart");
+    (void)frames.try_push(frame(3));
+    require(wait_until([&] { return worker.stats().submitted_access_units == 1; }), "restart frame missing");
+    require(worker.stats().key_frame_requests_applied == 0, "pending PLI leaked across sessions");
+    worker.stop(publisher::VideoEncoderStopMode::Abort);
+    const auto caller = std::this_thread::get_id();
+    unsigned requests = 0;
+    for (const auto& call : view->calls()) {
+        require(call.thread_id != caller && call.thread_id == view->calls().front().thread_id,
+                "backend call escaped encoder thread");
+        requests += call.type == ScriptedVideoEncoderCallType::RequestKeyFrame ? 1U : 0U;
+    }
+    require(requests == 1, "backend received duplicate or stale requests");
+}
+
 int main() {
     try {
         backend_lifecycle_stays_on_the_worker_thread();
+        pli_requests_are_coalesced_and_applied_on_the_encoder_thread();
         drain_preserves_batches_order_and_statistics();
         a_full_access_unit_queue_stops_input_consumption();
         drain_waits_only_until_all_pending_output_is_accepted();

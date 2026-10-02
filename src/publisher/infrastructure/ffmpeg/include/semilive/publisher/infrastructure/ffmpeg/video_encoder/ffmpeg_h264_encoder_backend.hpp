@@ -22,6 +22,8 @@ public:
     [[nodiscard]] contracts::encoder::VideoEncodeResult encode(
         const model::CapturedVideoFrame& frame) override;
     [[nodiscard]] contracts::encoder::VideoEncodeResult flush() override;
+    [[nodiscard]] std::expected<void, contracts::encoder::VideoEncoderIssue>
+    request_key_frame() override;
     void close() noexcept override;
 
 private:

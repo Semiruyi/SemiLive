@@ -61,6 +61,11 @@ validate_default_video_receive_worker_config(
         return std::unexpected{
             "video output stall threshold must be positive"};
     }
+    if (config.pli.initial_wait <= std::chrono::milliseconds::zero() ||
+        config.pli.retry_interval <= std::chrono::milliseconds::zero() ||
+        config.pli.media_inactivity_timeout <= std::chrono::milliseconds::zero()) {
+        return std::unexpected{"PLI intervals must be positive"};
+    }
     return {};
 }
 
@@ -76,7 +81,8 @@ struct DefaultVideoReceiveWorker::Impl {
           input_{std::move(input)},
           pipeline_{std::move(pipeline)},
           output_{std::move(output)},
-          rtcp_{std::move(rtcp)} {
+          rtcp_{std::move(rtcp)},
+          pli_policy_{config_.pli} {
         if (!input_ || !pipeline_ || !output_) {
             throw std::invalid_argument{
                 "video receive worker dependencies must not be null"};
@@ -120,6 +126,7 @@ struct DefaultVideoReceiveWorker::Impl {
     std::unique_ptr<H264RtpReceivePipeline> pipeline_;
     std::unique_ptr<output_contract::LiveVideoOutputBackend> output_;
     std::unique_ptr<ReceiverRtcpWorker> rtcp_;
+    PictureLossRequestPolicy pli_policy_;
     bool input_open_ = false;
     bool output_open_ = false;
     bool rtcp_started_ = false;
@@ -317,6 +324,7 @@ void DefaultVideoReceiveWorker::Impl::run(
 bool DefaultVideoReceiveWorker::Impl::start_session(
     const std::stop_token stop_token) {
     pipeline_->reset();
+    pli_policy_.reset();
 
     output_contract::LiveVideoOutputOpenResult opened_output;
     try {
@@ -465,6 +473,17 @@ bool DefaultVideoReceiveWorker::Impl::process_one_observation(
     if (auto issue = submit_outputs(std::move(outputs))) {
         fail_running_session(std::move(*issue));
         return false;
+    }
+    if (rtcp_) {
+        const auto snapshot = pipeline_->stats();
+        const auto now = Clock::now();
+        if (pli_policy_.observe(
+                snapshot.recovery.state == H264RecoveryState::WaitingForRandomAccess,
+                snapshot.session_filter.bound_ssrc,
+                snapshot.session_filter.accepted_packets, now) &&
+            rtcp_->request_pli(*snapshot.session_filter.bound_ssrc)) {
+            pli_policy_.requested(now);
+        }
     }
     return true;
 }

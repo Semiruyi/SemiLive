@@ -95,4 +95,11 @@ void ScriptedVideoEncoderBackend::close() noexcept {
                       std::this_thread::get_id(), std::nullopt});
 }
 
+std::expected<void, contracts::encoder::VideoEncoderIssue>
+ScriptedVideoEncoderBackend::request_key_frame() {
+    calls_.push_back({ScriptedVideoEncoderCallType::RequestKeyFrame,
+                      std::this_thread::get_id(), std::nullopt});
+    return {};
+}
+
 }  // namespace semilive::publisher::test_support

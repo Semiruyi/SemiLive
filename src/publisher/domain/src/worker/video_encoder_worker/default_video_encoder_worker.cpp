@@ -5,6 +5,7 @@
 #include <semilive/publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_queue_events.hpp>
 #include <semilive/publisher/domain/resource/encoded_video_access_unit_queue/encoded_video_access_unit_sink.hpp>
 #include <semilive/publisher/domain/worker/video_encoder_worker/video_encoder_worker_events.hpp>
+#include <semilive/publisher/domain/rtcp/publisher_rtcp_worker_events.hpp>
 
 #include <algorithm>
 #include <exception>
@@ -248,6 +249,9 @@ bool DefaultVideoEncoderWorker::begin_start() noexcept {
         }
         session_state_ = VideoEncoderWorkerState::Starting;
         stats_ = {};
+        key_frame_request_pending_ = false;
+        key_frame_request_queued_ = false;
+        ++session_generation_;
     }
 
     pending_access_units_.clear();
@@ -255,13 +259,52 @@ bool DefaultVideoEncoderWorker::begin_start() noexcept {
     backpressure_started_at_.reset();
     backend_open_ = false;
     backend_flushed_ = false;
+    last_key_frame_request_applied_.reset();
     return true;
+}
+
+void DefaultVideoEncoderWorker::process_command(RequestKeyFrameCommand& command) noexcept {
+    std::lock_guard lock{mutex_};
+    if (command.session_generation != session_generation_) {
+        return;
+    }
+    key_frame_request_queued_ = false;
+    key_frame_request_pending_ = session_state_ == VideoEncoderWorkerState::Running;
+}
+
+void DefaultVideoEncoderWorker::signal_key_frame_requested() noexcept {
+    std::lock_guard callback_lock{callback_mutex_};
+    if (!callbacks_enabled_) {
+        return;
+    }
+    try {
+        std::lock_guard lock{mutex_};
+        if (module_state_ != ModuleState::Alive ||
+            session_state_ != VideoEncoderWorkerState::Running) {
+            return;
+        }
+        ++stats_.key_frame_requests_received;
+        if (key_frame_request_pending_ || key_frame_request_queued_) {
+            ++stats_.key_frame_requests_coalesced;
+            return;
+        }
+        commands_.emplace_back(RequestKeyFrameCommand{session_generation_});
+        key_frame_request_queued_ = true;
+        cv_.notify_one();
+    } catch (...) {
+        // Feedback must not unwind through the RTCP transport thread.
+    }
 }
 
 DefaultVideoEncoderWorker::StartResult
 DefaultVideoEncoderWorker::start_session(
     VideoEncoderSessionConfig config) noexcept {
     try {
+        if (config.key_frame_request_minimum_interval <= std::chrono::milliseconds::zero()) {
+            return std::unexpected{worker_issue(VideoEncoderWorkerOperation::Control,
+                                               "key frame request interval must be positive")};
+        }
+        key_frame_request_minimum_interval_ = config.key_frame_request_minimum_interval;
         auto opened = backend_->open(config.encoder);
         if (!opened) {
             backend_->close();
@@ -396,6 +439,27 @@ bool DefaultVideoEncoderWorker::consume_and_encode_frame(
 
     contracts::encoder::VideoEncodeResult encoded;
     try {
+        bool request = false;
+        {
+            std::lock_guard lock{mutex_};
+            request = !draining && key_frame_request_pending_ &&
+                (!last_key_frame_request_applied_ ||
+                 started_at - *last_key_frame_request_applied_ >= key_frame_request_minimum_interval_);
+            if (request) {
+                key_frame_request_pending_ = false;
+            }
+        }
+        if (request) {
+            auto requested = backend_->request_key_frame();
+            if (!requested) {
+                fail_session(encoder_issue(VideoEncoderWorkerOperation::Encode,
+                                           std::move(requested.error())));
+                return true;
+            }
+            last_key_frame_request_applied_ = started_at;
+            std::lock_guard lock{mutex_};
+            ++stats_.key_frame_requests_applied;
+        }
         encoded = backend_->encode(frame);
     } catch (const std::exception& error) {
         fail_session(worker_issue(VideoEncoderWorkerOperation::Encode,
@@ -478,6 +542,13 @@ void DefaultVideoEncoderWorker::abort_session() noexcept {
 
 void DefaultVideoEncoderWorker::cleanup_session(
     const bool count_abandoned_pending) noexcept {
+    {
+        std::lock_guard lock{mutex_};
+        key_frame_request_pending_ = false;
+        key_frame_request_queued_ = false;
+        ++session_generation_;
+    }
+    last_key_frame_request_applied_.reset();
     finish_backpressure();
     if (count_abandoned_pending && !pending_access_units_.empty()) {
         std::lock_guard lock{mutex_};
@@ -523,6 +594,10 @@ void DefaultVideoEncoderWorker::notify_failure(
 }
 
 void DefaultVideoEncoderWorker::subscribe_to_resources() {
+    pli_subscription_ = notifier_->subscribe<PublisherPictureLossIndicationReceived>(
+        [this](const PublisherPictureLossIndicationReceived&) {
+            signal_key_frame_requested();
+        });
     frame_subscription_ = notifier_->subscribe<CapturedVideoFrameStoreNotEmpty>(
         [this](const CapturedVideoFrameStoreNotEmpty&) {
             signal_frame_available();
@@ -532,7 +607,7 @@ void DefaultVideoEncoderWorker::subscribe_to_resources() {
             [this](const EncodedVideoAccessUnitQueueNotFull&) {
                 signal_queue_available();
             });
-    if (!frame_subscription_ || !queue_subscription_) {
+    if (!frame_subscription_ || !queue_subscription_ || !pli_subscription_) {
         throw std::runtime_error{
             "video encoder worker could not subscribe to resource events"};
     }
@@ -563,6 +638,9 @@ void DefaultVideoEncoderWorker::signal_queue_available() noexcept {
 }
 
 void DefaultVideoEncoderWorker::disable_notifications() noexcept {
+    if (pli_subscription_) {
+        (void)pli_subscription_->unsubscribe();
+    }
     if (frame_subscription_) {
         (void)frame_subscription_->unsubscribe();
     }
@@ -632,7 +710,7 @@ void DefaultVideoEncoderWorker::cancel_pending_commands() noexcept {
                 using Value = std::remove_cvref_t<decltype(value)>;
                 if constexpr (std::is_same_v<Value, StartCommand>) {
                     complete(value.completion, cancelled);
-                } else {
+                } else if constexpr (std::is_same_v<Value, StopCommand>) {
                     complete(value.completion);
                 }
             },

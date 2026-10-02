@@ -63,7 +63,11 @@ private:
         std::promise<void> completion;
     };
 
-    using ControlCommand = std::variant<StartCommand, StopCommand>;
+    struct RequestKeyFrameCommand {
+        std::uint64_t session_generation = 0;
+    };
+    using ControlCommand = std::variant<StartCommand, StopCommand,
+                                        RequestKeyFrameCommand>;
 
     void worker_main(std::stop_token stop_token) noexcept;
     void worker_loop(std::stop_token stop_token);
@@ -72,6 +76,8 @@ private:
     void process_command(ControlCommand& command) noexcept;
     void process_command(StartCommand& command) noexcept;
     void process_command(StopCommand& command) noexcept;
+    void process_command(RequestKeyFrameCommand& command) noexcept;
+    void signal_key_frame_requested() noexcept;
 
     [[nodiscard]] bool begin_start() noexcept;
     [[nodiscard]] StartResult start_session(
@@ -126,6 +132,7 @@ private:
     bool callbacks_enabled_ = true;
     std::shared_ptr<contracts::Notifier::Subscription> frame_subscription_;
     std::shared_ptr<contracts::Notifier::Subscription> queue_subscription_;
+    std::shared_ptr<contracts::Notifier::Subscription> pli_subscription_;
 
     mutable std::mutex mutex_;
     std::condition_variable cv_;
@@ -136,6 +143,9 @@ private:
     VideoEncoderWorkerStats stats_;
     bool frame_available_hint_ = false;
     bool queue_available_hint_ = false;
+    bool key_frame_request_pending_ = false;
+    bool key_frame_request_queued_ = false;
+    std::uint64_t session_generation_ = 0;
 
     std::deque<model::EncodedVideoAccessUnit> pending_access_units_;
     std::deque<std::promise<void>> drain_waiters_;
@@ -143,6 +153,8 @@ private:
     std::optional<Clock::time_point> backpressure_started_at_;
     bool backend_open_ = false;
     bool backend_flushed_ = false;
+    std::chrono::milliseconds key_frame_request_minimum_interval_{500};
+    std::optional<Clock::time_point> last_key_frame_request_applied_;
 
     std::jthread worker_;
 };

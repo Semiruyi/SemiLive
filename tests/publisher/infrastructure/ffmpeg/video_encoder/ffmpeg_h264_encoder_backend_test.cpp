@@ -232,9 +232,55 @@ void invalid_inputs_fail_the_session_and_close_resets_it() {
 
 }  // namespace
 
+bool has_nal_type(const std::vector<std::byte>& bytes, unsigned type) {
+    for (std::size_t i = 0; i + 3 < bytes.size(); ++i) {
+        if (bytes[i] == std::byte{0} && bytes[i + 1] == std::byte{0} &&
+            bytes[i + 2] == std::byte{1} &&
+            (byte_value(bytes[i + 3]) & 31U) == type) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void explicit_requests_produce_one_idr_with_parameter_sets() {
+    FfmpegH264EncoderBackend backend;
+    require(!backend.request_key_frame(), "closed encoder accepted a request");
+    auto config = test_config();
+    config.gop_size = 300;
+    require(backend.open(config).has_value(), "encoder must open");
+    std::vector<model::EncodedVideoAccessUnit> output;
+    append(output, backend.encode(captured_frame(64, 64, 0, std::chrono::milliseconds{0})), "first frame");
+    append(output, backend.encode(captured_frame(64, 64, 1, std::chrono::milliseconds{33})), "delta frame");
+    require(backend.request_key_frame().has_value(), "request must be accepted");
+    require(backend.request_key_frame().has_value(), "duplicate request must be accepted");
+    append(output, backend.encode(captured_frame(64, 64, 2, std::chrono::milliseconds{66})), "forced frame");
+    append(output, backend.encode(captured_frame(64, 64, 3, std::chrono::milliseconds{99})), "following frame");
+    append(output, backend.flush(), "flush");
+    require(output.size() == 4, "all input frames must be returned");
+    require(has_nal_type(output[2].annex_b, 5) &&
+            has_nal_type(output[2].annex_b, 7) && has_nal_type(output[2].annex_b, 8),
+            "forced frame must contain IDR, SPS and PPS");
+    require(!has_nal_type(output[1].annex_b, 5) && !has_nal_type(output[3].annex_b, 5),
+            "forced IDR must not stick on the reused AVFrame");
+    require(!backend.request_key_frame(), "flushed encoder accepted a request");
+    backend.close();
+    require(backend.open(config).has_value(), "encoder must reopen");
+    require(backend.request_key_frame().has_value(), "request must be accepted before close");
+    backend.close();
+    require(backend.open(config).has_value(), "encoder must reopen without pending state");
+    output.clear();
+    append(output, backend.encode(captured_frame(64, 64, 0, std::chrono::milliseconds{0})), "reopened first");
+    append(output, backend.encode(captured_frame(64, 64, 1, std::chrono::milliseconds{33})), "reopened delta");
+    append(output, backend.flush(), "reopened flush");
+    require(output.size() == 2 && !has_nal_type(output[1].annex_b, 5),
+            "close must clear pending requests");
+}
+
 int main() {
     try {
         lifecycle_and_effective_configuration_are_enforced();
+        explicit_requests_produce_one_idr_with_parameter_sets();
         dimension_changes_and_gapped_pts_preserve_metadata();
         invalid_inputs_fail_the_session_and_close_resets_it();
     } catch (const std::exception& error) {

@@ -16,6 +16,7 @@ SemiLive 是一个使用 C++23 实现的实时视频传输与弱网恢复项目�
 - 有界 RTP 重排、Access Unit 组装和 SPS/PPS/IDR 随机访问恢复；
 - RTCP Sender Report、Receiver Report、Report Block、RTT 和 jitter 观测；
 - RTCP Generic NACK、发送端历史缓存和原 RTP datagram 重传；
+- 恢复等待触发 RTCP PLI，编码线程限频生成 IDR 与 SPS/PPS，缩短随机访问恢复等待；
 - Annex-B 文件输出和有界异步 ffplay 实时预览；
 - Publisher、Relay、Receiver 三端机器可读报告和自动实验汇总；
 - Windows 与 Linux CI，以及覆盖协议、状态机、并发和网络边界的 CTest 测试。
@@ -46,7 +47,7 @@ flowchart LR
     end
 
     Publisher -->|RTCP SR| Receiver
-    Receiver -->|RTCP RR and Generic NACK| Publisher
+    Receiver -->|RTCP RR, Generic NACK and PLI| Publisher
 ```
 
 媒体链路和控制链路使用独立 UDP endpoint。网络 I/O、协议解析、媒体处理、控制策略和进程装配
@@ -83,6 +84,8 @@ datagram，并重新发送到原媒体 endpoint。
 
 ## 实验结果
 
+### 历史 NACK 与重排窗口实验
+
 测试条件：1920x1080、30fps、H.264、目标码率 4Mbps；每档运行 60 秒，使用 seed
 `1001/1002/1003` 重复 3 次，表中为输出 Access Unit 交付率中位数。
 
@@ -114,6 +117,95 @@ datagram，并重新发送到原媒体 endpoint。
 会改变后续 datagram 序列，因此对照结论来自多 seed 的方向一致性，不宣称不同运行逐包完全相同。
 
 指标定义、实验约束和完整测试矩阵见[弱网测试矩阵](docs/testing/weak-network-matrix.md)。
+
+### NACK 与 NACK + PLI 对照（2026-10-02）
+
+测试条件：Windows / MSYS2 UCRT64 Release，同机 Publisher -> 丢包 Relay -> Receiver；
+1920x1080、30fps、H.264、目标码率 4Mbps、GOP 60。两组均启用 RTCP/NACK，
+重排窗口为 1024 包、最长等待 50ms，发送历史缓存为 500ms；仅切换 PLI 开关。
+PLI 首次等待 100ms、重试间隔 500ms，发送端关键帧请求最小执行间隔 500ms。
+每次预热 3 秒、采集窗口 20 秒，7 档丢包率各使用 seed `1001/1002/1003`，共 42 次实验。
+
+#### 已完成事件的平均恢复等待
+
+恢复等待从 H.264 recovery gate 进入等待状态开始，到接受完整随机访问 AU 并恢复输出结束。
+下表将每档三次实验的 `wait_total_ms` 相加，除以 `episodes_completed` 总数，
+得到按事件加权的平均值；不是三次实验平均值的中位数，也不是 PLI 请求到恢复的耗时。
+该统计覆盖全会话，不包含启动阶段等待或末尾尚未完成的恢复事件。
+
+| 随机丢包率 | NACK 平均等待 | NACK + PLI 平均等待 | 等待缩短 | 已完成事件数（NACK / NACK + PLI） |
+|---:|---:|---:|---:|---:|
+| 0% | 无恢复事件 | 无恢复事件 | 不适用 | 0 / 0 |
+| 0.1% | 无恢复事件 | 无恢复事件 | 不适用 | 0 / 0 |
+| 0.5% | 1611.0ms | 170.0ms | 89.4% | 1 / 1 |
+| 1% | 1276.0ms | 166.3ms | 87.0% | 2 / 3 |
+| 3% | 1073.9ms | 255.9ms | 76.2% | 12 / 27 |
+| 5% | 1361.3ms | 457.0ms | 66.4% | 24 / 55 |
+| 10% | 4121.1ms | 1684.0ms | 59.1% | 13 / 34 |
+
+0.5% 与 1% 的恢复事件样本很少，不能据此宣称稳定的优化比例。两组事件不是逐条配对的；
+PLI 组完成事件更多，可能包含更多短事件，因此平均等待下降不能单独代表总体卡顿改善。
+当前报告未保存逐事件耗时分布，不能据此计算恢复等待的 P95/P99。
+
+#### 包含未完成事件的累计等待
+
+下表汇总三次实验的 `wait_total_including_active_ms`；结束时尚未恢复的事件也计入等待。
+此口径包含预热与收尾，Receiver 比 Publisher 晚停止，发送端停止后的等待可能继续累计，
+因此不是 20 秒采集窗口内的卡顿总时长，也不是显示冻结时间。
+
+| 随机丢包率 | NACK 累计等待 | NACK + PLI 累计等待 | 等待减少 | 结束时未完成事件数（NACK / NACK + PLI） |
+|---:|---:|---:|---:|---:|
+| 0% | 0s | 0s | 不适用 | 0 / 0 |
+| 0.1% | 0s | 0s | 不适用 | 0 / 0 |
+| 0.5% | 1.611s | 0.170s | 89.4% | 0 / 0 |
+| 1% | 2.552s | 0.499s | 80.4% | 0 / 0 |
+| 3% | 16.187s | 6.910s | 57.3% | 1 / 0 |
+| 5% | 35.892s | 33.851s | 5.7% | 1 / 2 |
+| 10% | 73.079s | 67.732s | 7.3% | 3 / 2 |
+
+#### 交付率与 T0->T5 延迟
+
+交付率以预热后的 20 秒采集窗口内已发送 AU 为分母；延迟只统计成功交付的 AU，
+终点为 Receiver AU 可交付，不包含解码和显示。下表分别取三次交付率和三次 P95 的中位数。
+
+| 随机丢包率 | NACK AU 交付率 | NACK + PLI AU 交付率 | NACK 延迟 P95 | NACK + PLI 延迟 P95 |
+|---:|---:|---:|---:|---:|
+| 0% | 100% | 100% | 14.6ms | 17.5ms |
+| 0.1% | 100% | 100% | 15.4ms | 20.8ms |
+| 0.5% | 100% | 100% | 36.3ms | 35.2ms |
+| 1% | 100% | 99.0% | 36.6ms | 36.6ms |
+| 3% | 76.7% | 88.2% | 37.7ms | 37.5ms |
+| 5% | 56.1% | 58.7% | 65.7ms | 61.7ms |
+| 10% | 8.2% | 7.7% | 65.5ms | 67.1ms |
+
+本次观察到：3% 档恢复等待与交付率均有明显改善；5% 与 10% 档虽然已完成事件平均恢复更快，
+但恢复事件更多，累计等待改善有限，10% 档交付率也未提升。不能将结果概括为
+“所有弱网场景卡顿减少 60%~90%”。3% 档各次最长已完成等待的中位数为 1538ms -> 727ms，
+这是另一种统计口径，不与上面的平均等待混用。
+
+42 次实验的 trace 与三端会话均有效，媒体收发计数匹配，容量触发缺口和重传缓存 miss 均为零；
+Release 59 项 CTest 与 11 项 Python 测试通过。3% 档三次总媒体与重传发送字节数增加约 12.9%，
+但输入内容不固定，不能把流量差异全部归因于 PLI。5%/10% 档存在全会话 PLI 发送、接收、
+执行计数差额，可能与收尾时两端生命周期不同有关，尚未逐条定位，不宣称所有请求均执行。
+
+两组依次采集实时桌面，而不是固定内容回放；相同 seed 不保证逐包内容相同。
+本机反馈链路未注入丢包或额外 RTT，结论不直接外推到真实网络。
+下一步通过固定内容与受控单次损坏，记录损坏确认、PLI、IDR 和恢复输出时间线，
+再验证单次恢复时间、恢复成功率及有效采集窗口内的累计等待。
+
+本机原始报告位于 `experiments/pli-matrix-20261002-off/` 与
+`experiments/pli-matrix-20261002-on/`，每次实验包含 `receiver.json`、`summary.json` 等报告；
+根目录包含 `runs.csv`、`groups.json`，PLI 组另有 `comparison.csv/json`。
+`experiments/` 为本机生成数据，不随源码提交；可用以下命令生成新报告（输出目录须不存在）：
+
+```powershell
+./tools/experiments/run-loss-baseline.ps1 -Python python -ReorderPackets 1024 `
+  -DisablePli -OutputDirectory experiments/pli-reproduce-off
+./tools/experiments/run-loss-baseline.ps1 -Python python -ReorderPackets 1024 `
+  -OutputDirectory experiments/pli-reproduce-on
+python ./tools/experiments/compare.py experiments/pli-reproduce-off `
+  experiments/pli-reproduce-on --variable pli
+```
 
 ## 快速构建
 
@@ -249,13 +341,14 @@ docs             设计、计划、测试方法和路线图
 
 - 仅完成视频链路，尚未接入系统音频和音画同步；
 - 当前重传不是 RFC 4588 RTX；
-- 尚未实现 PLI、FEC、带宽估计、Pacer 和拥塞控制；
+- 已实现恢复等待触发 PLI、请求合并与限频、编码线程强制 IDR；尚未实现 FEC、带宽估计、Pacer 和拥塞控制；
 - Relay 当前只注入独立随机丢包，尚未覆盖延迟、抖动、乱序、重复包和带宽限制；
 - ffplay 用于阶段性预览，不保留 Receiver 的 AU 媒体时间，不能据此声称精确端到端延迟；
 - 3% 以上随机丢包时，完整帧交付和随机访问恢复仍有明显改进空间；
 - Linux 当前承担可移植构建与测试，还不是生产形态的多客户端媒体转发服务。
 
-近期计划是补充重排容量与超时观测，继续验证 512/1024 包窗口，随后实现 PLI 驱动的关键帧恢复；
+已完成 NACK 与 NACK + PLI 的随机丢包矩阵对照；近期计划是固定输入内容、补齐恢复事件时间线，
+并区分有效采集窗口与收尾等待，验证单次恢复与关键帧传输策略；
 更长期再接入 SemiPlayer、系统音频与音画同步。
 
 ## License

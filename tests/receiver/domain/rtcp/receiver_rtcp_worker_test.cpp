@@ -1,6 +1,7 @@
 #include <semilive/common/rtcp/rtcp_packet.hpp>
 #include <semilive/common/rtcp/ntp_time.hpp>
 #include <semilive/receiver/domain/rtcp/default_receiver_rtcp_worker.hpp>
+#include <semilive/receiver/domain/rtcp/picture_loss_request_policy.hpp>
 #include <semilive/receiver/domain/rtp/rtp_missing_tracker.hpp>
 #include <semilive/receiver/domain/rtp/rtp_reception_statistics.hpp>
 
@@ -258,11 +259,39 @@ void sends_explicit_picture_loss_indication() {
 
 }  // namespace
 
+void recovery_pli_policy_handles_startup_retry_inactivity_and_reset() {
+    using Policy = domain::PictureLossRequestPolicy;
+    Policy policy;
+    const auto t = Policy::Clock::time_point{1s};
+    require(!policy.observe(true, std::nullopt, 0, t), "no source must not trigger PLI");
+    require(!policy.observe(true, 42, 1, t), "startup must wait");
+    require(!policy.observe(true, 42, 2, t + 99ms), "PLI sent before grace period");
+    require(policy.observe(true, 42, 2, t + 100ms), "startup IDR loss must trigger PLI");
+    policy.requested(t + 100ms);
+    require(!policy.observe(true, 42, 3, t + 599ms), "retry must be limited");
+    require(policy.observe(true, 42, 3, t + 600ms), "retry must become due");
+    policy.requested(t + 600ms);
+    require(!policy.observe(false, 42, 4, t + 610ms), "recovery must stop PLI");
+    require(!policy.observe(true, 42, 5, t + 620ms), "new episode must wait");
+    require(!policy.observe(true, 42, 5, t + 720ms), "cooldown must span recovery episodes");
+    require(!policy.observe(true, 42, 5, t + 2s), "inactive sender must not trigger PLI");
+    require(policy.observe(true, 42, 6, t + 2010ms), "resumed media must enable retry");
+    policy.reset();
+    require(!policy.observe(true, 42, 1, t + 3s), "restart must clear timers");
+    require(!policy.observe(true, 43, 1, t + 3100ms), "source change must restart wait");
+    domain::PictureLossRequestConfig disabled;
+    disabled.enabled = false;
+    Policy off{disabled};
+    require(!off.observe(true, 42, 1, t) && !off.observe(true, 42, 2, t + 1s),
+            "disabled policy must not trigger");
+}
+
 int main() {
     try {
         sends_rr_and_tracks_the_last_sender_report();
         sends_due_generic_nacks_and_retries_only_missing_packets();
         sends_explicit_picture_loss_indication();
+        recovery_pli_policy_handles_startup_retry_inactivity_and_reset();
         std::cout << "receiver RTCP worker tests passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {

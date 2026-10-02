@@ -2,6 +2,31 @@ if(NOT DEFINED SEMILIVE_RECEIVER)
     message(FATAL_ERROR "SEMILIVE_RECEIVER is required")
 endif()
 
+foreach(option IN ITEMS --pli-initial-wait-ms --pli-retry-interval-ms --pli-media-timeout-ms)
+    foreach(value IN ITEMS 0 60001 -1 nope)
+        execute_process(COMMAND "${SEMILIVE_RECEIVER}" "${option}" "${value}"
+            RESULT_VARIABLE result ERROR_VARIABLE error)
+        if(result EQUAL 0 OR NOT error MATCHES "requires an integer in 1..60000")
+            message(FATAL_ERROR "receiver accepted invalid PLI interval: ${option}: ${value}: ${error}")
+        endif()
+    endforeach()
+    execute_process(COMMAND "${SEMILIVE_RECEIVER}" "${option}"
+        RESULT_VARIABLE result ERROR_VARIABLE error)
+    if(result EQUAL 0 OR NOT error MATCHES "requires a value")
+        message(FATAL_ERROR "receiver accepted missing PLI interval: ${error}")
+    endif()
+    execute_process(COMMAND "${SEMILIVE_RECEIVER}" "${option}" 100 "${option}" 200
+        RESULT_VARIABLE result ERROR_VARIABLE error)
+    if(result EQUAL 0 OR NOT error MATCHES "may only be specified once")
+        message(FATAL_ERROR "receiver accepted duplicate PLI interval: ${error}")
+    endif()
+endforeach()
+execute_process(COMMAND "${SEMILIVE_RECEIVER}" --disable-pli --disable-pli
+    RESULT_VARIABLE result ERROR_VARIABLE error)
+if(result EQUAL 0 OR NOT error MATCHES "may only be specified once")
+    message(FATAL_ERROR "receiver accepted duplicate PLI switch: ${error}")
+endif()
+
 foreach(value IN ITEMS 0 32768 -1 nope)
     execute_process(
         COMMAND "${SEMILIVE_RECEIVER}" --rtp-reorder-packets "${value}"

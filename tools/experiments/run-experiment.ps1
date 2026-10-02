@@ -10,6 +10,10 @@ param(
     [ValidateRange(0, 100)][double]$LossPercent = 0,
     [UInt64]$Seed = 1001,
     [switch]$EnableRtcp,
+    [switch]$DisablePli,
+    [ValidateRange(1, 60000)][int]$PliInitialWaitMs = 100,
+    [ValidateRange(1, 60000)][int]$PliRetryIntervalMs = 500,
+    [ValidateRange(1, 60000)][int]$PliMediaTimeoutMs = 1000,
     [ValidateRange(1, 65535)][int]$PublisherRtcpPort = 5005,
     [ValidateRange(1, 65535)][int]$ReceiverRtcpPort = 5007,
     [ValidateRange(1, 65535)][int]$ReceiverPort = 5006,
@@ -47,6 +51,10 @@ try {
                     '--rtp-reorder-packets', "$ReorderPackets",
                     '--output-mode', 'file', '--output', 'received.h264', '--stats-json', 'receiver.json',
                     '--run-duration-seconds', "$($seconds + 5)")
+                $receiverArgs += @('--pli-initial-wait-ms', "$PliInitialWaitMs",
+                    '--pli-retry-interval-ms', "$PliRetryIntervalMs",
+                    '--pli-media-timeout-ms', "$PliMediaTimeoutMs")
+                if ($DisablePli) { $receiverArgs += '--disable-pli' }
                 if ($EnableRtcp) {
                     $receiverArgs += @('--rtcp-bind-address', '127.0.0.1', '--rtcp-bind-port', "$ReceiverRtcpPort",
                         '--rtcp-peer-address', '127.0.0.1', '--rtcp-peer-port', "$PublisherRtcpPort")
@@ -87,7 +95,9 @@ try {
                 @{run_id=$run; mode=$kind; warmup_seconds=$WarmupSeconds; duration_seconds=$DurationSeconds;
                     publisher_args=$publisherArgs; receiver_args=$receiverArgs; relay_args=$relayArgs;
                     build_directory=$bin; rtcp_enabled=[bool]$EnableRtcp; loss_percent=$LossPercent; seed=$runSeed;
-                    reorder_packets=$ReorderPackets} | ConvertTo-Json -Depth 5 |
+                    reorder_packets=$ReorderPackets; pli_enabled=([bool]$EnableRtcp -and !$DisablePli);
+                    pli_initial_wait_ms=$PliInitialWaitMs; pli_retry_interval_ms=$PliRetryIntervalMs;
+                    pli_media_timeout_ms=$PliMediaTimeoutMs; publisher_key_frame_minimum_interval_ms=500} | ConvertTo-Json -Depth 5 |
                     Set-Content -LiteralPath (Join-Path $dir 'manifest.json') -Encoding UTF8
                 $publisher = Start-Process -FilePath (Join-Path $bin 'semilive_publisher.exe') -ArgumentList $publisherArgs `
                     -WorkingDirectory $dir -WindowStyle Hidden -PassThru `

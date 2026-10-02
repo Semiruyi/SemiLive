@@ -185,6 +185,12 @@ void write_rtcp_config(std::ostream& output,
 void write_config(std::ostream& output,
                   const composition::ReceiverConfig& config) {
     output << "  \"config\": {\n"
+              "    \"pli\": {\n"
+              "      \"enabled\": " << (config.pli.enabled ? "true" : "false") << ",\n"
+              "      \"initial_wait_ms\": " << config.pli.initial_wait.count() << ",\n"
+              "      \"retry_interval_ms\": " << config.pli.retry_interval.count() << ",\n"
+              "      \"media_inactivity_timeout_ms\": " << config.pli.media_inactivity_timeout.count() << "\n"
+              "    },\n"
               "    \"input\": {\n"
               "      \"bind_address\": ";
     write_json_string(output, config.input.bind_address);

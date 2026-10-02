@@ -87,6 +87,7 @@ Reanalyze with:
 ```powershell
 python tools/experiments/analyze.py publisher.csv receiver.csv --output result --warmup-seconds 5 --duration-seconds 60
 python tools/experiments/test_analyze.py
+python tools/experiments/test_compare.py
 ```
 
 ## Random loss experiments
@@ -98,7 +99,13 @@ python tools/experiments/test_analyze.py
 
 Defaults: Release, 0/0.1/0.5/1/3/5/10 percent random loss, three seeds
 (1001/1002/1003), three-second warmup and 20-second measurement per run.
-RTCP/NACK is enabled; feedback is direct loopback and has no added loss or delay.
+RTCP/NACK and automatic PLI are enabled; feedback is direct loopback and has no added loss or delay.
+Use -DisablePli to retain NACK while disabling automatic PLI (the historical baseline).
+PLI waits 100ms in recovery, retries every 500ms, and pauses after 1000ms without
+accepted media. Override with -PliInitialWaitMs, -PliRetryIntervalMs and
+-PliMediaTimeoutMs. Publisher requests coalesce and are applied to the next input
+frame no more frequently than every 500ms. Existing queued output is not discarded.
+These intervals are experimental defaults, not a production tuning claim.
 Reorder capacity defaults to 512 packets; -ReorderPackets changes capacity only,
 leaving the 50ms hold limit unchanged. Receiver CLI: --rtp-reorder-packets COUNT.
 After both matrices finish, compare with:
@@ -106,6 +113,20 @@ After both matrices finish, compare with:
 ```powershell
 python tools/experiments/compare.py experiments/BASELINE experiments/CANDIDATE
 ```
+
+For a PLI on/off comparison, keep reorder capacity and all other settings equal:
+
+```powershell
+./tools/experiments/run-loss-baseline.ps1 -Python python -ReorderPackets 1024 -DisablePli -OutputDirectory experiments/pli-off
+./tools/experiments/run-loss-baseline.ps1 -Python python -ReorderPackets 1024 -OutputDirectory experiments/pli-on
+python tools/experiments/compare.py experiments/pli-off experiments/pli-on --variable pli
+```
+
+Reports include PLI sent/received counts and applied encoder requests. An accepted
+request is not proof of receiver recovery; IDR loss and natural GOP boundaries can
+affect recovery. Counters alone do not attribute an episode to PLI rather than NACK
+or a periodic IDR. The legacy whole-session runner explicitly disables PLI to
+preserve its historical NACK-only behavior.
 
 This checks media settings, seeds, warmup/measurement duration, RTCP and hold
 limit, then writes comparison.csv/json into CANDIDATE. Identical settings and

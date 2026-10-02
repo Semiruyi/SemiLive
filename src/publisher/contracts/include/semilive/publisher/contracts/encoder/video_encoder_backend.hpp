@@ -43,6 +43,7 @@ enum class VideoEncoderOperation : std::uint8_t {
     ConvertFrame,
     SendFrame,
     ReceivePacket,
+    RequestKeyFrame,
     Flush,
     Close,
 };
@@ -72,6 +73,13 @@ public:
     [[nodiscard]] virtual VideoEncodeResult encode(
         const model::CapturedVideoFrame& frame) = 0;
     [[nodiscard]] virtual VideoEncodeResult flush() = 0;
+    // Accepted requests affect the next input frame, not already buffered output.
+    [[nodiscard]] virtual std::expected<void, VideoEncoderIssue>
+    request_key_frame() {
+        return std::unexpected{VideoEncoderIssue{
+            VideoEncoderOperation::RequestKeyFrame, 0,
+            "key frame requests are not supported by this backend"}};
+    }
     virtual void close() noexcept = 0;
 
 protected:

@@ -2,6 +2,7 @@
 
 #include <semilive/receiver/contracts/network/datagram_source_backend.hpp>
 #include <semilive/receiver/domain/pipeline/h264_rtp_receive_pipeline.hpp>
+#include <semilive/receiver/domain/rtcp/picture_loss_request_policy.hpp>
 #include <semilive/common/rtcp/rtcp_transport.hpp>
 
 #include <chrono>
@@ -38,6 +39,7 @@ struct ReceiverConfig {
     std::chrono::milliseconds receive_poll_interval{10};
     std::chrono::milliseconds output_stall_threshold{100};
     std::optional<ReceiverRtcpConfig> rtcp;
+    domain::PictureLossRequestConfig pli;
 };
 
 }  // namespace semilive::receiver::composition

@@ -28,6 +28,10 @@ def main():
                       + rtcp.get("retransmitted_packets", 0))
         received_ok = relay["traffic"]["forwarded_datagrams"] == rec["input"]["received_datagrams"]
         rows.append({"loss_percent": m["loss_percent"], "seed": m["seed"], "valid": s["valid"],
+                     "pli_enabled": m.get("pli_enabled", False),
+                     "pli_packets_sent_total": (rec["rtcp"] or {}).get("pli_packets_sent", 0),
+                     "pli_packets_received_total": rtcp.get("pli_packets_received", 0),
+                     "key_frame_requests_applied_total": pub["encoder"].get("key_frame_requests_applied", 0),
                      "reorder_packets": rec["config"]["rtp"]["reorder_maximum_buffered_packets"],
                      "reorder_hold_ms": rec["config"]["rtp"]["reorder_maximum_hold_ms"],
                      "sent_aus": s["selected_frames"], "delivered_aus": s["matched_frames"],
@@ -52,7 +56,10 @@ def main():
     groups = []
     for loss in sorted({r["loss_percent"] for r in rows}):
         selected = [r for r in rows if r["loss_percent"] == loss]
+        if len({r["pli_enabled"] for r in selected}) != 1:
+            raise SystemExit("Mixed PLI settings within a loss group")
         result = {"loss_percent": loss, "runs": len(selected),
+                  "pli_enabled": selected[0]["pli_enabled"],
                   "runs_with_delivery": sum(r["delivered_aus"] > 0 for r in selected),
                   "delivery_percent_min": min(r["delivery_percent"] for r in selected),
                   "delivery_percent_max": max(r["delivery_percent"] for r in selected),

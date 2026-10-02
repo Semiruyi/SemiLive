@@ -282,6 +282,9 @@ VideoEncoderOpenResult FfmpegH264Encoder::open(
     if (auto result = set_option(*replacement_context, "tune", "zerolatency")) {
         return std::unexpected{std::move(*result)};
     }
+    if (auto result = set_option(*replacement_context, "forced-idr", "1")) {
+        return std::unexpected{std::move(*result)};
+    }
     if (auto result = set_option(
             *replacement_context, "x264-params",
             "repeat-headers=1:annexb=1")) {

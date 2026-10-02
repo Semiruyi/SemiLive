@@ -563,6 +563,7 @@ foreach ($loss in $LossPercents) {
         $relayDuration = $DurationSeconds + $tailSeconds +
             $startupPaddingSeconds
         $receiverArgs = @(
+            "--disable-pli",
             "--bind-address", "127.0.0.1",
             "--bind-port", "$ReceiverPort",
             "--output-mode", "file",

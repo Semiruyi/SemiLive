@@ -90,6 +90,10 @@ void print_help() {
            "  --rtcp-peer-address ADDRESS     Publisher RTCP IPv4 or IPv6 address\n"
            "  --rtcp-peer-port PORT           Publisher RTCP UDP port\n"
            "  --rtcp-report-interval-ms MS    RR interval (default: 1000)\n"
+           "  --disable-pli                   Disable automatic keyframe requests\n"
+           "  --pli-initial-wait-ms MS         Recovery wait before PLI (default: 100)\n"
+           "  --pli-retry-interval-ms MS       PLI retry interval (default: 500)\n"
+           "  --pli-media-timeout-ms MS        Pause after media inactivity (default: 1000)\n"
            "  --output-mode MODE              file or ffplay "
            "(default: file)\n"
            "  --output PATH                   Annex-B H.264 output file\n"
@@ -156,6 +160,10 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
     bool rtcp_peer_address_set = false;
     bool rtcp_peer_port_set = false;
     bool rtcp_report_interval_set = false;
+    bool disable_pli_set = false;
+    bool pli_initial_wait_set = false;
+    bool pli_retry_interval_set = false;
+    bool pli_media_timeout_set = false;
     bool output_mode_set = false;
     bool output_set = false;
     bool ffplay_path_set = false;
@@ -313,6 +321,41 @@ CommandLineResult parse_command_line(const int argc, char* argv[]) {
             continue;
         }
 
+        if (argument == "--disable-pli") {
+            if (disable_pli_set) {
+                return std::unexpected{"--disable-pli may only be specified once"};
+            }
+            disable_pli_set = true;
+            options.receiver.pli.enabled = false;
+            continue;
+        }
+        if (argument == "--pli-initial-wait-ms" ||
+            argument == "--pli-retry-interval-ms" ||
+            argument == "--pli-media-timeout-ms") {
+            auto& already_set = argument == "--pli-initial-wait-ms" ? pli_initial_wait_set
+                : argument == "--pli-retry-interval-ms" ? pli_retry_interval_set
+                                                      : pli_media_timeout_set;
+            if (already_set) {
+                return std::unexpected{std::string{argument} + " may only be specified once"};
+            }
+            if (++index >= argc) {
+                return std::unexpected{std::string{argument} + " requires a value"};
+            }
+            const auto value = parse_unsigned(argv[index]);
+            if (!value || *value < 1 || *value > 60000) {
+                return std::unexpected{std::string{argument} + " requires an integer in 1..60000"};
+            }
+            const auto interval = std::chrono::milliseconds{static_cast<std::int64_t>(*value)};
+            if (argument == "--pli-initial-wait-ms") {
+                options.receiver.pli.initial_wait = interval;
+            } else if (argument == "--pli-retry-interval-ms") {
+                options.receiver.pli.retry_interval = interval;
+            } else {
+                options.receiver.pli.media_inactivity_timeout = interval;
+            }
+            already_set = true;
+            continue;
+        }
         if (argument == "--rtcp-bind-address" ||
             argument == "--rtcp-peer-address") {
             auto& already_set = argument == "--rtcp-bind-address"

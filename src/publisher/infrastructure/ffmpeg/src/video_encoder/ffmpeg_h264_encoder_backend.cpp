@@ -199,6 +199,7 @@ struct FfmpegH264EncoderBackend::Impl {
     std::optional<model::MediaClockTicks> last_submitted_ticks_;
     std::optional<model::MediaClockTicks> last_emitted_ticks_;
     State state_ = State::Closed;
+    bool key_frame_pending_ = false;
 };
 
 contracts::encoder::VideoEncoderOpenResult FfmpegH264EncoderBackend::Impl::open(
@@ -284,11 +285,14 @@ contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::Impl::encode(
     }
 
     const auto codec_started = std::chrono::steady_clock::now();
+    encoder_frame_->pict_type = key_frame_pending_ ? AV_PICTURE_TYPE_I
+                                                  : AV_PICTURE_TYPE_NONE;
     auto packets = encoder_.encode(*encoder_frame_);
     const auto codec_finished = std::chrono::steady_clock::now();
     if (!packets) {
         return fail(std::move(packets.error()));
     }
+    key_frame_pending_ = false;
     last_submitted_ticks_ = *ticks;
 
     auto access_units = make_access_units(std::move(*packets));
@@ -391,6 +395,7 @@ contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::Impl::fail(
 }
 
 void FfmpegH264EncoderBackend::Impl::close() noexcept {
+    key_frame_pending_ = false;
     encoder_.close();
     encoder_frame_.reset();
     converter_.reset();
@@ -425,6 +430,16 @@ contracts::encoder::VideoEncodeResult FfmpegH264EncoderBackend::flush() {
 
 void FfmpegH264EncoderBackend::close() noexcept {
     impl_->close();
+}
+
+std::expected<void, contracts::encoder::VideoEncoderIssue>
+FfmpegH264EncoderBackend::request_key_frame() {
+    if (impl_->state_ != Impl::State::Open) {
+        return std::unexpected{issue(VideoEncoderOperation::State, 0,
+                                    "key frame requests require an open encoder")};
+    }
+    impl_->key_frame_pending_ = true;
+    return {};
 }
 
 }  // namespace semilive::publisher::infra::ffmpeg

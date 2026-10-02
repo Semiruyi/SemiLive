@@ -46,7 +46,7 @@ RTP 包数、丢包、乱序、恢复点和输出 AU 统计能够相互解释。
 - [x] 统计 RTT、丢包率、interarrival jitter 和反馈状态
 - [x] 实现 Generic NACK、发送历史缓存和重传截止时间
 - [ ] 按 RFC 4588 实现 RTX 封装与接收还原
-- [ ] 实现 PLI、发送端强制 IDR 和请求抑制
+- [x] 实现 PLI、发送端强制 IDR 和请求抑制
 - [ ] 对比等待周期 IDR、NACK/RTX 和 PLI 三种恢复策略
 - [ ] 发布弱网与恢复报告
 

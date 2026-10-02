@@ -103,7 +103,7 @@ ReceiverCompositionResult ReceiverComposition::Impl::assemble() {
         }
         domain::DefaultVideoReceiveWorkerConfig worker_config{
             config_.input, config_.receive_poll_interval,
-            config_.output_stall_threshold};
+            config_.output_stall_threshold, config_.pli};
         std::unique_ptr<domain::ReceiverRtcpWorker> rtcp;
         if (config_.rtcp) {
             domain::ReceiverRtcpWorkerConfig rtcp_config{

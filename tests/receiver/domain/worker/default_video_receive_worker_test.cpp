@@ -1,4 +1,5 @@
 #include <semilive/receiver/domain/worker/default_video_receive_worker.hpp>
+#include <atomic>
 
 #include <chrono>
 #include <condition_variable>
@@ -200,10 +201,36 @@ private:
     std::vector<output_contract::LiveVideoOutputCloseMode> close_modes_;
 };
 
+class ScriptedRtcpWorker final : public domain::ReceiverRtcpWorker {
+public:
+    domain::ReceiverRtcpStartResult start() override {
+        state_ = domain::ReceiverRtcpWorkerState::Running;
+        return semilive::common::rtcp::TransportInfo{"127.0.0.1", 5007, 1500, 262144};
+    }
+    bool request_pli(std::uint32_t source) noexcept override {
+        source_ = source;
+        ++requests_;
+        return true;
+    }
+    void stop() noexcept override { state_ = domain::ReceiverRtcpWorkerState::Idle; }
+    domain::ReceiverRtcpWorkerState state() const noexcept override { return state_.load(); }
+    domain::ReceiverRtcpWorkerStats stats() const noexcept override {
+        domain::ReceiverRtcpWorkerStats result;
+        result.state = state();
+        result.pli_packets_sent = requests_.load();
+        return result;
+    }
+    std::atomic<unsigned> requests_{0};
+    std::atomic<std::uint32_t> source_{0};
+    std::atomic<domain::ReceiverRtcpWorkerState> state_{domain::ReceiverRtcpWorkerState::Idle};
+};
+
 class WorkerFixture final {
 public:
     explicit WorkerFixture(
-        const std::chrono::milliseconds output_stall_threshold = 100ms)
+        const std::chrono::milliseconds output_stall_threshold = 100ms,
+        std::unique_ptr<domain::ReceiverRtcpWorker> rtcp = {},
+        domain::PictureLossRequestConfig pli = {})
         : trace{std::make_shared<BackendTrace>()} {
         auto input_owner =
             std::make_unique<ScriptedDatagramSource>(trace);
@@ -216,10 +243,11 @@ public:
         config.input.bind_port = 0;
         config.receive_poll_interval = 2ms;
         config.output_stall_threshold = output_stall_threshold;
+        config.pli = pli;
         worker = std::make_unique<domain::DefaultVideoReceiveWorker>(
             std::move(config), std::move(input_owner),
             std::make_unique<domain::H264RtpReceivePipeline>(),
-            std::move(output_owner));
+            std::move(output_owner), std::move(rtcp));
     }
 
     std::shared_ptr<BackendTrace> trace;
@@ -515,9 +543,36 @@ void runtime_input_failure_aborts_and_requires_stop_acknowledgement() {
 
 }  // namespace
 
+void startup_loss_requests_pli_then_stops_after_idr() {
+    auto rtcp = std::make_unique<ScriptedRtcpWorker>();
+    auto* view = rtcp.get();
+    domain::PictureLossRequestConfig config;
+    config.initial_wait = 10ms;
+    config.retry_interval = 50ms;
+    config.media_inactivity_timeout = 500ms;
+    WorkerFixture fixture{100ms, std::move(rtcp), config};
+    require(fixture.worker->start().has_value(), "receiver must start");
+    queue_datagram(*fixture.input, datagram(100, 90000, true, {0x61, 0x44}));
+    require(wait_until([&] { return view->requests_.load() > 0; }),
+            "startup without IDR must automatically request PLI");
+    require(view->source_.load() == 0x1234'5678U, "PLI must target bound media source");
+    queue_random_access(*fixture.input, 101, 93000);
+    require(wait_until([&] { return fixture.worker->stats().submitted_access_units == 1; }),
+            "IDR must restore output");
+    const auto requests = view->requests_.load();
+    std::this_thread::sleep_for(120ms);
+    require(view->requests_.load() == requests, "recovered receiver kept requesting PLI");
+    require(fixture.worker->stop().has_value(), "receiver must stop");
+    require(fixture.worker->start().has_value(), "receiver must restart");
+    std::this_thread::sleep_for(30ms);
+    require(view->requests_.load() == requests, "restart leaked bound SSRC or PLI timer");
+    require(fixture.worker->stop().has_value(), "restarted receiver must stop");
+}
+
 int main() {
     try {
         drives_the_complete_pipeline_on_one_worker_thread();
+        startup_loss_requests_pli_then_stops_after_idr();
         backpressure_discards_until_the_next_random_access_point();
         session_end_reports_the_censored_terminal_gap_separately();
         input_open_failure_rolls_back_output_and_allows_retry();
